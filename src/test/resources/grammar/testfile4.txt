@@ -1,0 +1,40 @@
+// testfile4.txt (C级 - 只有 main)
+
+int main() {
+    printf("23371300\n"); // #1
+
+    // Part 1: 声明与表达式
+    const int C1 = 10;
+    int a = 20, b = 3; // 覆盖: 多重声明
+    int c = -a; // 覆盖: 一元负号
+    int d = +b; // 覆盖: 一元正号
+    int e = a + b * c; // 覆盖: 优先级. e = 20 + 3 * (-20) = -40
+    int f = (a + b) - c; // 覆盖: 括号表达式, 表达式链. f = (20+3) - (-20) = 43
+    printf("Expressions: e=%d, f=%d\n", e, f); // #2
+
+    // Part 2: 控制流 if
+    if (a > b) { printf("a > b is true\n"); } // #3
+    if (b > a) { } else { printf("b > a is false\n"); } // #4
+
+    // Part 3: for 循环变体大全
+    int i = 0, j = 0;
+    for (i = 0, j = 5; i < 1; i = i + 1, j = j - 1) { // 覆盖: 多重初始化/操作
+        printf("Multi-for: i=%d,j=%d\n", i, j); // #5
+    }
+    for (; i < 2; i = i + 1) { printf("For no-init: i=%d\n", i); } // #6 (i从1开始)
+    for (i = 0; i < 1; ) { i = i + 1; } // 覆盖: 无循环后操作
+    for (i = 0; ; i = i + 1) { if(i>0) break; } // 覆盖: 无条件
+    for (;;) { break; } // 覆盖: 全空
+    printf("All for-variants passed.\n"); // #7
+
+    // Part 4: 边角语句
+    {} // 覆盖: 空块
+    ;  // 覆盖: 空语句
+    printf("Corner cases passed.\n"); // #8
+
+    int sum = 0;
+    for(i=0; i<3; i=i+1) { if(i==1) continue; sum=sum+i; if(sum>1) break; }
+    printf("Final sum: %d\n", sum); // #9 (i=0,s=0; i=1,cont; i=2,s=2,break)
+    printf("Test finished.\n"); // #10
+    return 0;
+}

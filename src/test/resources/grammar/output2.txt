@@ -1,0 +1,10 @@
+23371300
+g_arr[0] before: 1
+g_arr[0] after: 11
+Element received: 2
+Sum from get_sum: 60
+New sum of g_arr: 13
+Print #7
+Print #8
+Print #9
+Print #10

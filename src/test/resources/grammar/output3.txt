@@ -1,0 +1,10 @@
+23371300
+G Const Arr[1]: 20
+G Partial Arr[1]: 2
+G Partial Arr[4]: 0
+L Full Arr[0]: 100
+L Empty Arr[2]: 0
+L No-Init Arr[1]: 2
+Loop with arr element: sum=1
+Print #9
+Print #10

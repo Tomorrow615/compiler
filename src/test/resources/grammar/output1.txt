@@ -1,0 +1,10 @@
+23371300
+Relational Ops Check: 1
+Loop sum (5+6+7+8): 26
+Multi-static vars value: 11
+Multi-static vars value: 13
+Multi-param func result: 20
+Side effect after short-circuit: 0
+Single static var value: 51
+Single static var value: 52
+Logical NOT test passed: 1

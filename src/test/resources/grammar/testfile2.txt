@@ -1,0 +1,45 @@
+// testfile2.txt (B级 - 数组传参“全家桶”)
+
+int g_arr[2] = {1, 2};
+
+// 覆盖: 接收整个数组
+void process_whole_array(int arr[]) {
+    arr[0] = arr[0] + 10;
+}
+
+// 覆盖: 接收单个数组元素
+void process_element(int elem) {
+    printf("Element received: %d\n", elem);
+}
+
+// 覆盖: 多参数(数组+普通变量)
+int get_sum(int arr[], int size) {
+    int sum=0, i=0;
+    for(i=0; i<size; i=i+1) { sum = sum + arr[i]; }
+    return sum;
+}
+
+int main() {
+    printf("23371300\n"); // #1
+
+    printf("g_arr[0] before: %d\n", g_arr[0]); // #2
+    process_whole_array(g_arr);
+    printf("g_arr[0] after: %d\n", g_arr[0]); // #3 (11)
+
+    process_element(g_arr[1]); // #4
+
+    int l_arr[3] = {10, 20, 30};
+    int sum = get_sum(l_arr, 3);
+    printf("Sum from get_sum: %d\n", sum); // #5 (60)
+
+    int result = get_sum(g_arr, 2);
+    printf("New sum of g_arr: %d\n", result); // #6 (11+2=13)
+
+    // 凑数
+    printf("Print #7\n"); // #7
+    printf("Print #8\n"); // #8
+    printf("Print #9\n"); // #9
+    printf("Print #10\n"); // #10
+
+    return 0;
+}

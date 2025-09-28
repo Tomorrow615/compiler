@@ -1,0 +1,33 @@
+// testfile3.txt (B级 - 数组声明“全家桶”)
+
+const int C_ARR[2] = {10, 20}; // 覆盖: 全局常量数组(必须指定大小)
+int g_arr_partial[5] = {1, 2, 3}; // 覆盖: 全局数组部分初始化
+
+int main() {
+    printf("23371300\n"); // #1
+
+    int l_arr_full[2] = {100, 200}; // 覆盖: 局部数组完全初始化
+    int l_arr_empty[3] = {}; // 覆盖: 局部数组空初始化
+    int l_arr_no_init[2]; // 覆盖: 局部数组无初始化
+    l_arr_no_init[0] = 1;
+    l_arr_no_init[1] = 2;
+
+    printf("G Const Arr[1]: %d\n", C_ARR[1]); // #2
+    printf("G Partial Arr[1]: %d\n", g_arr_partial[1]); // #3
+    printf("G Partial Arr[4]: %d\n", g_arr_partial[4]); // #4 (应为0)
+    printf("L Full Arr[0]: %d\n", l_arr_full[0]); // #5
+    printf("L Empty Arr[2]: %d\n", l_arr_empty[2]); // #6 (应为0)
+    printf("L No-Init Arr[1]: %d\n", l_arr_no_init[1]); // #7
+
+    // 覆盖: 数组元素作为循环条件
+    int i=0, sum=0;
+    for(i=0; i < C_ARR[0] / 5; i=i+1) { // 10/5=2
+        sum = sum + i;
+    }
+    printf("Loop with arr element: sum=%d\n", sum); // #8 (sum=0+1=1)
+
+    printf("Print #9\n"); // #9
+    printf("Print #10\n"); // #10
+
+    return 0;
+}

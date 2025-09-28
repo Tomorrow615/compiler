@@ -1,0 +1,10 @@
+23371300
+Expressions: e=-40, f=43
+a > b is true
+b > a is false
+Multi-for: i=0,j=5
+For no-init: i=1
+All for-variants passed.
+Corner cases passed.
+Final sum: 2
+Test finished.
