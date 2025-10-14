@@ -1,41 +1,56 @@
 package io.github.tomorrow615.compiler.frontend.parser;
 
-import io.github.tomorrow615.compiler.frontend.lexer.Token;
-import io.github.tomorrow615.compiler.frontend.lexer.TokenType;
 import io.github.tomorrow615.compiler.frontend.ast.*;
 import io.github.tomorrow615.compiler.frontend.ast.decl.*;
 import io.github.tomorrow615.compiler.frontend.ast.expr.*;
 import io.github.tomorrow615.compiler.frontend.ast.func.*;
+import io.github.tomorrow615.compiler.frontend.ast.stmt.*;
+import io.github.tomorrow615.compiler.frontend.error.*;
+import io.github.tomorrow615.compiler.frontend.lexer.*;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class Parser {
     private final List<Token> tokens;
-    private int currentPos = 0; // 一个指向当前待处理 Token 的“指针”
+    private int currentPos = 0;
+    private final ParserRecorder recorder;
+    private Token lastConsumedToken = null;
 
-    public Parser(List<Token> tokens) {
+    public Parser(List<Token> tokens, ParserRecorder recorder) {
         this.tokens = tokens;
+        this.recorder = recorder;
     }
 
-    // "预读"：查看当前位置的Token，但不“吃掉”它。这是做语法判断的核心。
     private Token peek() {
         if (currentPos < tokens.size()) {
             return tokens.get(currentPos);
         }
-        // 为了防止程序末尾出现数组越界，我们返回一个特殊的EOF Token
-        // 假设你的Token构造函数支持这样创建
         return new Token(TokenType.EOF, "EOF", -1, -1);
     }
 
-    // "消费"：吃掉当前的Token，并将指针后移一位。
-    private Token consume() {
+    private Token peekNext() {
+        if (currentPos + 1 < tokens.size()) {
+            return tokens.get(currentPos + 1);
+        }
+        return new Token(TokenType.EOF, "EOF", -1, -1);
+    }
+
+    private Token advance() {
         if (currentPos < tokens.size()) {
             Token token = tokens.get(currentPos);
             currentPos++;
             return token;
         }
         return new Token(TokenType.EOF, "EOF", -1, -1);
+    }
+
+    private Token consume() {
+        Token token = advance();
+        this.lastConsumedToken = token;
+        recorder.recordToken(token);
+        return token;
     }
 
     public CompUnitNode parse() {
@@ -51,13 +66,12 @@ public class Parser {
 
         // 循环解析 {Decl}
         while (peek().getType() == TokenType.CONSTTK ||
-                peek().getType() == TokenType.STATICTK || // <-- 增加对 static 的判断
+                peek().getType() == TokenType.STATICTK ||
                 (peek().getType() == TokenType.INTTK && peekNext().getType() != TokenType.LPARENT && peekNext().getType() != TokenType.MAINTK)) {
             decls.add(parseDecl());
         }
 
         // 循环解析 {FuncDef}
-        // 如何判断是FuncDef？预读一下，如果是'void'或者'int' (但后面不是'main')
         while (peek().getType() == TokenType.VOIDTK ||
                 (peek().getType() == TokenType.INTTK && peekNext().getType() != TokenType.MAINTK)) {
             funcDefs.add(parseFuncDef());
@@ -66,19 +80,11 @@ public class Parser {
         // 解析 MainFuncDef
         mainFuncDef = parseMainFuncDef();
 
+        recorder.recordSyntax("CompUnit");
         return new CompUnitNode(decls, funcDefs, mainFuncDef, startLine);
     }
 
-    // 预读第二个Token的辅助方法，对于判断`int`的类型非常有用
-    private Token peekNext() {
-        if (currentPos + 1 < tokens.size()) {
-            return tokens.get(currentPos + 1);
-        }
-        return new Token(TokenType.EOF, "EOF", -1, -1);
-    }
-
     private DeclNode parseDecl() {
-        // 判断是常量声明还是变量声明
         if (peek().getType() == TokenType.CONSTTK) {
             return parseConstDecl();
         } else {
@@ -88,157 +94,216 @@ public class Parser {
 
     private ConstDeclNode parseConstDecl() {
         int startLine = peek().getLineNumber();
-
-        // 1. 消费 'const' 关键字
-        Token constToken = matchAndConsume(TokenType.CONSTTK);
-
-        // 2. 解析 BType
+        Token constToken = consume();
         BTypeNode bType = parseBType();
-
-        // 3. 解析第一个 ConstDef
         List<ConstDefNode> constDefs = new ArrayList<>();
         constDefs.add(parseConstDef());
 
-        // 4. 循环解析 { ',' ConstDef }
         while (peek().getType() == TokenType.COMMA) {
-            consume(); // 消费 ','
+            consume();
             constDefs.add(parseConstDef());
         }
 
-        // 5. 匹配并消费 ';'
-        Token semicn = matchAndConsume(TokenType.SEMICN);
-
+        Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+        recorder.recordSyntax("ConstDecl");
         return new ConstDeclNode(constToken, bType, constDefs, semicn, startLine);
     }
 
-    // 添加新的占位方法
     private BTypeNode parseBType() {
-        // 根据文法，BType 必须是一个 'int'。
-        // 我们直接调用 matchAndConsume 来确保这一点，并获取这个 Token。
-        Token typeToken = matchAndConsume(TokenType.INTTK);
-
-        // 用获取到的 Token 创建 BTypeNode 并返回。
+        Token typeToken = matchAndConsume(TokenType.INTTK, 'z');
+        recorder.recordSyntax("BType");
         return new BTypeNode(typeToken);
     }
 
     private ConstDefNode parseConstDef() {
-        // 1. 解析 Ident
-        Token ident = matchAndConsume(TokenType.IDENFR);
-
-        // 为数组维度信息准备列表
+        Token ident = consume();
         List<Token> lBracks = new ArrayList<>();
         List<ConstExpNode> constExps = new ArrayList<>();
         List<Token> rBracks = new ArrayList<>();
 
-        // 2. 使用 while 循环处理所有数组维度定义
         while (peek().getType() == TokenType.LBRACK) {
-            lBracks.add(consume()); // 消费并保存 '['
+            lBracks.add(consume());
             constExps.add(parseConstExp());
-            rBracks.add(matchAndConsume(TokenType.RBRACK)); // 消费并保存 ']'
+            rBracks.add(matchAndConsume(TokenType.RBRACK, 'k'));
         }
 
-        // 3. 解析 '='
-        Token assignToken = matchAndConsume(TokenType.ASSIGN);
-
-        // 4. 解析 ConstInitVal
+        Token assignToken = matchAndConsume(TokenType.ASSIGN, 'z'); // Should not happen here based on grammar
         ConstInitValNode constInitVal = parseConstInitVal();
-
+        recorder.recordSyntax("ConstDef");
         return new ConstDefNode(ident, lBracks, constExps, rBracks, assignToken, constInitVal);
     }
 
-    // 添加新的占位方法
     private ConstExpNode parseConstExp() {
         AddExpNode addExp = parseAddExp();
+        recorder.recordSyntax("ConstExp");
         return new ConstExpNode(addExp);
     }
 
-    // 实现一个【简化版】的 AddExp 解析器，第三阶段再来完善
     private AddExpNode parseAddExp() {
         // TODO: Phase 3 will implement full expression parsing.
-        // For now, we assume an AddExp is just a simple number for array dimensions.
         System.out.println("Parsing AddExp... (Simplified version)");
-
-        // 暂时只处理最简单的情况：一个 IntConst
-        // 后面我们会把它替换成完整的表达式解析逻辑
-        Token number = matchAndConsume(TokenType.INTCON);
-
-        // 为了让类型匹配，我们需要一个临时的AddExpNode来包装这个Number
-        // 这是一个简化的设计，后续会重构
+        Token number = matchAndConsume(TokenType.INTCON, 'z');
+        recorder.recordSyntax("AddExp");
         return new AddExpNode(number);
     }
 
     private ConstInitValNode parseConstInitVal() {
-        // 通过预读来判断是单个表达式还是数组初始化列表
         if (peek().getType() == TokenType.LBRACE) {
-            // Case 2: Array Initializer -> '{' [ ConstExp { ',' ConstExp } ] '}'
-            Token lBrace = consume(); // 消费并保存 '{'
-
+            Token lBrace = consume();
             List<ConstExpNode> arrayInit = new ArrayList<>();
             List<Token> commas = new ArrayList<>();
 
-            // 判断花括号内是否为空
             if (peek().getType() != TokenType.RBRACE) {
                 arrayInit.add(parseConstExp());
-
-                // 循环解析 { ',' ConstExp }
                 while (peek().getType() == TokenType.COMMA) {
-                    commas.add(consume()); // 消费并保存 ','
+                    commas.add(consume());
                     arrayInit.add(parseConstExp());
                 }
             }
-
-            Token rBrace = matchAndConsume(TokenType.RBRACE); // 消费并保存 '}'
-
+            Token rBrace = matchAndConsume(TokenType.RBRACE, 'z');
+            recorder.recordSyntax("ConstInitVal");
             return new ConstInitValNode(lBrace, arrayInit, commas, rBrace);
         } else {
-            // Case 1: Single Expression -> ConstExp
             ConstExpNode singleInit = parseConstExp();
+            recorder.recordSyntax("ConstInitVal");
             return new ConstInitValNode(singleInit);
         }
     }
 
     private VarDeclNode parseVarDecl() {
-        // TODO: 在下一个任务中实现
-        System.out.println("Parsing VarDecl... (Not implemented yet)");
-        while(peek().getType() != TokenType.SEMICN && peek().getType() != TokenType.EOF) {
-            consume();
+        int startLine = peek().getLineNumber();
+        Token staticToken = null;
+        if (peek().getType() == TokenType.STATICTK) {
+            staticToken = consume();
         }
-        consume(); // 消耗分号
-        return null;
+
+        BTypeNode bType = parseBType();
+        List<VarDefNode> varDefs = new ArrayList<>();
+        varDefs.add(parseVarDef());
+
+        while (peek().getType() == TokenType.COMMA) {
+            consume();
+            varDefs.add(parseVarDef());
+        }
+
+        Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+        recorder.recordSyntax("VarDecl");
+        return new VarDeclNode(staticToken, bType, varDefs, semicn, startLine);
+    }
+
+    private VarDefNode parseVarDef() {
+        Token ident = consume();
+        List<Token> lBracks = new ArrayList<>();
+        List<ConstExpNode> constExps = new ArrayList<>();
+        List<Token> rBracks = new ArrayList<>();
+
+        while (peek().getType() == TokenType.LBRACK) {
+            lBracks.add(consume());
+            constExps.add(parseConstExp());
+            rBracks.add(matchAndConsume(TokenType.RBRACK, 'k'));
+        }
+
+        Token assignToken = null;
+        InitValNode initVal = null;
+        if (peek().getType() == TokenType.ASSIGN) {
+            assignToken = consume();
+            initVal = parseInitVal();
+        }
+        recorder.recordSyntax("VarDef");
+        return new VarDefNode(ident, lBracks, constExps, rBracks, assignToken, initVal);
+    }
+
+    private InitValNode parseInitVal() {
+        if (peek().getType() == TokenType.LBRACE) {
+            Token lBrace = consume();
+            List<ExpNode> arrayInit = new ArrayList<>();
+            List<Token> commas = new ArrayList<>();
+
+            if (peek().getType() != TokenType.RBRACE) {
+                arrayInit.add(parseExp());
+                while (peek().getType() == TokenType.COMMA) {
+                    commas.add(consume());
+                    arrayInit.add(parseExp());
+                }
+            }
+            Token rBrace = matchAndConsume(TokenType.RBRACE, 'z');
+            recorder.recordSyntax("InitVal");
+            return new InitValNode(lBrace, arrayInit, commas, rBrace);
+        } else {
+            ExpNode singleInit = parseExp();
+            recorder.recordSyntax("InitVal");
+            return new InitValNode(singleInit);
+        }
+    }
+
+    private ExpNode parseExp() {
+        // 根据文法 Exp -> AddExp
+        AddExpNode addExp = parseAddExp();
+        recorder.recordSyntax("Exp");
+        return new ExpNode(addExp);
     }
 
     private FuncDefNode parseFuncDef() {
-        // TODO: 后续任务中实现
-        System.out.println("Parsing FuncDef... (Not implemented yet)");
-        // 临时消耗掉一些token以防死循环，例如消耗到右花括号
-        while(peek().getType() != TokenType.RBRACE && peek().getType() != TokenType.EOF) {
+        FuncTypeNode funcType = parseFuncType();
+        Token ident = consume();
+        Token lparen = consume();
+
+        FuncFParamsNode funcFParams = null;
+        if (peek().getType() != TokenType.RPARENT) {
+            funcFParams = parseFuncFParams();
+        }
+
+        Token rparen = matchAndConsume(TokenType.RPARENT, 'j');
+        BlockNode block = parseBlock();
+        recorder.recordSyntax("FuncDef");
+        return new FuncDefNode(funcType, ident, lparen, funcFParams, rparen, block);
+    }
+
+    private FuncTypeNode parseFuncType() {
+        Token typeToken = consume();
+        recorder.recordSyntax("FuncType");
+        return new FuncTypeNode(typeToken);
+    }
+
+    private FuncFParamsNode parseFuncFParams() {
+        // TODO: Phase 2 will implement this fully.
+        System.out.println("Parsing FuncFParams... (Simplified version)");
+        while (peek().getType() != TokenType.RPARENT && peek().getType() != TokenType.EOF) {
             consume();
         }
-        consume(); // 消耗右花括号
-        return null; // 暂时返回null
+        recorder.recordSyntax("FuncFParams");
+        return new FuncFParamsNode(-1);
+    }
+
+    private BlockNode parseBlock() {
+        // Phase 1: 仍然是简化版
+        Token lBrace = consume();
+        while (peek().getType() != TokenType.RBRACE && peek().getType() != TokenType.EOF) {
+            consume();
+        }
+        Token rBrace = matchAndConsume(TokenType.RBRACE, 'z'); // A missing } is a complex error, placeholder for now
+        recorder.recordSyntax("Block");
+        return new BlockNode(lBrace, rBrace);
     }
 
     private MainFuncDefNode parseMainFuncDef() {
-        // TODO: 后续任务中实现
-        System.out.println("Parsing MainFuncDef... (Not implemented yet)");
-        // 临时消耗掉一些token以防死循环，例如消耗到右花括号
-        while(peek().getType() != TokenType.RBRACE && peek().getType() != TokenType.EOF) {
-            consume();
-        }
-        consume(); // 消耗右花括号
-        return new MainFuncDefNode(-1); // 暂时返回一个伪造的节点
+        Token intToken = consume();
+        Token mainToken = consume();
+        Token lparen = consume();
+        Token rparen = matchAndConsume(TokenType.RPARENT, 'j');
+        BlockNode block = parseBlock();
+        recorder.recordSyntax("MainFuncDef");
+        return new MainFuncDefNode(intToken, mainToken, lparen, rparen, block);
     }
 
-    private Token matchAndConsume(TokenType expectedType) {
-        Token current = peek();
-        if (current.getType() == expectedType) {
-            return consume();
+    private Token matchAndConsume(TokenType expectedType, char errorCode) {
+        if (peek().getType() == expectedType) {
+            return consume(); // 正确情况
         } else {
-            // 这里我们先简单地返回一个null，或者一个表示错误的Token
-            // 后面可以集成ErrorReporter来报告错误
-            System.err.println("Error: Expected " + expectedType + " but got " + current.getType() + " at line " + current.getLineNumber());
-            // 错误恢复策略：暂时不消费，假装匹配到了，让上层继续
-            return null;
+            // 错误！
+            int line = (lastConsumedToken != null) ? lastConsumedToken.getLineNumber() : peek().getLineNumber();
+            ErrorReporter.addError(line, errorCode);
+            return null; // 错误恢复：假装匹配，返回null
         }
     }
 

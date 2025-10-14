@@ -1,7 +1,9 @@
 package io.github.tomorrow615.compiler.frontend.lexer;
 
 import io.github.tomorrow615.compiler.frontend.error.ErrorReporter;
+import io.github.tomorrow615.compiler.util.*;
 
+import java.io.PrintWriter;
 import java.io.IOException;
 import java.io.PushbackReader;
 import java.io.StringReader;
@@ -14,6 +16,7 @@ public class Lexer {
     private final PushbackReader reader;
     private final StringBuilder tokenText = new StringBuilder();
     private int currentLine = 1;
+    private final LexerRecorder recorder;
 
     private static final Map<String, TokenType> keywords = new HashMap<>();
 
@@ -32,8 +35,9 @@ public class Lexer {
         keywords.put("static", TokenType.STATICTK);
     }
 
-    public Lexer(String sourceCode) {
+    public Lexer(String sourceCode, LexerRecorder recorder) {
         this.reader = new PushbackReader(new StringReader(sourceCode));
+        this.recorder = recorder;
     }
 
     public List<Token> getAllTokens() {
@@ -41,6 +45,7 @@ public class Lexer {
         Token token;
         do {
             token = getNextToken();
+            recorder.recordToken(token);
             tokens.add(token);
         } while (token.getType() != TokenType.EOF);
         return tokens;
