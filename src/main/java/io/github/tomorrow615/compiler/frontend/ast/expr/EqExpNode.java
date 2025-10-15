@@ -6,14 +6,14 @@ import java.util.List;
 
 // 代表 EqExp → RelExp { ('==' | '!=') RelExp }
 public class EqExpNode extends ASTNode {
-    private final RelExpNode firstRelExp;
+    // 修改前: firstRelExp 和 followingRelExps
+    // 修改后: 统一的 relExps 列表
+    private final List<RelExpNode> relExps;
     private final List<Token> operators;
-    private final List<RelExpNode> followingRelExps;
 
-    public EqExpNode(RelExpNode firstRelExp, List<Token> operators, List<RelExpNode> followingRelExps) {
-        super(firstRelExp.getLineNumber());
-        this.firstRelExp = firstRelExp;
+    public EqExpNode(List<RelExpNode> relExps, List<Token> operators) {
+        super(relExps.get(0).getLineNumber());
+        this.relExps = relExps;
         this.operators = operators;
-        this.followingRelExps = followingRelExps;
     }
 }

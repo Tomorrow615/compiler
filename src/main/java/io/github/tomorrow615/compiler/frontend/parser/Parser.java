@@ -37,6 +37,13 @@ public class Parser {
         return new Token(TokenType.EOF, "EOF", -1, -1);
     }
 
+    private Token peek(int k) {
+        if (currentPos + k < tokens.size()) {
+            return tokens.get(currentPos + k);
+        }
+        return new Token(TokenType.EOF, "EOF", -1, -1);
+    }
+
     private Token advance() {
         if (currentPos < tokens.size()) {
             Token token = tokens.get(currentPos);
@@ -82,16 +89,16 @@ public class Parser {
 
         int startLine = peek().getLineNumber();
 
-        // 循环解析 {Decl}
+        // 修正后的 Decl 解析循环
         while (peek().getType() == TokenType.CONSTTK ||
-                peek().getType() == TokenType.STATICTK ||
-                (peek().getType() == TokenType.INTTK && peekNext().getType() != TokenType.LPARENT && peekNext().getType() != TokenType.MAINTK)) {
+                (peek().getType() == TokenType.INTTK && peek(2).getType() != TokenType.LPARENT)) {
             decls.add(parseDecl());
         }
 
-        // 循环解析 {FuncDef}
-        while (peek().getType() == TokenType.VOIDTK ||
-                (peek().getType() == TokenType.INTTK && peekNext().getType() != TokenType.MAINTK)) {
+        // 修正后的 FuncDef 解析循环
+        while ((peek().getType() == TokenType.VOIDTK ||
+                (peek().getType() == TokenType.INTTK && peekNext().getType() != TokenType.MAINTK)) &&
+                peek(2).getType() == TokenType.LPARENT) {
             funcDefs.add(parseFuncDef());
         }
 
@@ -157,28 +164,6 @@ public class Parser {
         AddExpNode addExp = parseAddExp();
         recorder.recordSyntax("ConstExp");
         return new ConstExpNode(addExp);
-    }
-
-    private AddExpNode parseAddExp() {
-        // 先解析第一个必须存在的 MulExp
-        MulExpNode firstMulExp = parseMulExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<MulExpNode> followingMulExps = new ArrayList<>();
-
-        // 循环解析 { ('+' | '-') MulExp } 部分
-        while (peek().getType() == TokenType.PLUS ||
-                peek().getType() == TokenType.MINU) {
-
-            // 保存运算符
-            operators.add(consume());
-
-            // 解析后面的 MulExp
-            followingMulExps.add(parseMulExp());
-        }
-
-        recorder.recordSyntax("AddExp");
-        return new AddExpNode(firstMulExp, operators, followingMulExps);
     }
 
     private ConstInitValNode parseConstInitVal() {
@@ -349,46 +334,41 @@ public class Parser {
         return new BlockNode(lBrace, blockItems, rBrace);
     }
 
+    // 在 Parser.java 中
     private BlockItemNode parseBlockItem() {
-        // 根据修正后的文法，Decl 的起始符号包括 'const', 'static', 'int'
         if (peek().getType() == TokenType.CONSTTK ||
-                peek().getType() == TokenType.STATICTK ||
-                peek().getType() == TokenType.INTTK) {
+                peek().getType() == TokenType.INTTK ||
+                peek().getType() == TokenType.STATICTK) {
             return parseDecl();
         } else {
+            // 直接解析并返回语句，不做任何额外处理
             return parseStmt();
         }
     }
 
+    // 在 Parser.java 中
     private StmtNode parseStmt() {
-        // 根据文法，查看 Stmt 的各个产生式开头的 Token
         TokenType currentType = peek().getType();
 
         if (currentType == TokenType.LBRACE) {
-            // Stmt -> Block
-            return parseBlock();
+            // 规则: Stmt -> Block
+            // 在这里，我们解析一个 Block，然后明确地把它当作一个 Stmt 来记录。
+            BlockNode blockNode = parseBlock(); // parseBlock 只负责解析和打印 <Block>
+            recorder.recordSyntax("Stmt"); // 我们在这里为它补上 <Stmt> 的身份
+            return blockNode;
         } else if (currentType == TokenType.IFTK) {
-            // Stmt -> 'if' ...
             return parseIfStmt();
         } else if (currentType == TokenType.FORTK) {
-            // Stmt -> 'for' ...
             return parseForStmt();
         } else if (currentType == TokenType.BREAKTK) {
-            // Stmt -> 'break' ...
             return parseBreakStmt();
         } else if (currentType == TokenType.CONTINUETK) {
-            // Stmt -> 'continue' ...
             return parseContinueStmt();
         } else if (currentType == TokenType.RETURNTK) {
-            // Stmt -> 'return' ...
             return parseReturnStmt();
         } else if (currentType == TokenType.PRINTFTK) {
-            // Stmt -> 'printf' ...
             return parsePrintfStmt();
         } else {
-            // 剩下的情况是 LVal = Exp; 或 [Exp];
-            // 这是最复杂的情况，因为它们都可能以 IDENFR 开头
-            // 我们创建一个专门的方法来处理
             return parseAssignOrExpStmt();
         }
     }
@@ -538,44 +518,67 @@ public class Parser {
         return new LValNode(ident, lBracks, arrayExps, rBracks);
     }
 
-    private StmtNode parseAssignOrExpStmt() {
-        // 关键的 "试探-回退" 逻辑
-        // 1. 保存当前位置
-        int savedPos = savePosition();
+    // 这是一个"轻量级"的先行查看函数，它只看不消费，没有副作用
+    private boolean isAssignment() {
+        // 保存当前真实位置
+        int initialPos = savePosition();
+        int tempPos = initialPos;
 
-        // 2. 试探性地解析 LVal
-        // 为了避免试探时产生错误报告，我们暂时不处理这里的错误
-        // (一个更复杂的实现会创建一个不报告错误的 " speculative parser")
-        try {
-            LValNode lVal = parseLVal(true);
-            if (peek().getType() == TokenType.ASSIGN) {
-                // 试探成功，我们确认这就是一个赋值语句
-                // 此时 lVal 已经被解析，但还没有打印 <LVal>，现在补上
-                recorder.recordSyntax("LVal");
-                Token assignToken = matchAndConsume(TokenType.ASSIGN, 'z');
-                ExpNode exp = parseExp();
-                Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
-                recorder.recordSyntax("Stmt");
-                return new AssignStmtNode(lVal, assignToken, exp, semicn);
+        // 如果连第一个 token 都不存在，或者不是 IDENFR，肯定不是赋值语句
+        if (tempPos >= tokens.size() || tokens.get(tempPos).getType() != TokenType.IDENFR) {
+            return false;
+        }
+        tempPos++; // 虚拟指针跳过 IDENFR
+
+        // 跳过所有可能的数组下标 `[...]`
+        while (tempPos < tokens.size() && tokens.get(tempPos).getType() == TokenType.LBRACK) {
+            tempPos++; // 跳过 '['
+
+            // 使用括号层级计数来找到匹配的 ']'
+            int bracketLevel = 1;
+            while (bracketLevel > 0 && tempPos < tokens.size()) {
+                TokenType type = tokens.get(tempPos).getType();
+                if (type == TokenType.LBRACK) {
+                    bracketLevel++;
+                } else if (type == TokenType.RBRACK) {
+                    bracketLevel--;
+                } else if (type == TokenType.EOF) {
+                    // 如果在找到匹配的 ']' 之前就结束了，说明语法有误，肯定不是赋值语句
+                    return false;
+                }
+                tempPos++;
             }
-        } catch (Exception e) {
-            // 如果试探性解析 LVal 失败（例如，它实际上是 `(a+b)`），
-            // 也会进入回退逻辑。
         }
 
-        // 3b. 试探失败，它不是一个以 LVal 开头的赋值语句。
-        // 我们回退到保存的位置，把它当作一个普通的表达式语句来解析。
-        restorePosition(savedPos);
-
-        ExpNode exp = null;
-        if (peek().getType() != TokenType.SEMICN) {
-            // 对应 [Exp]; 中的 Exp
-            exp = parseExp();
+        // 最终检查 LVal 后面的 token 是不是 '='
+        if (tempPos < tokens.size() && tokens.get(tempPos).getType() == TokenType.ASSIGN) {
+            return true;
         }
-        // 对应 ';'
-        Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
-        recorder.recordSyntax("Stmt");
-        return new ExpStmtNode(exp, semicn);
+
+        return false;
+    }
+
+    // 第二步：重写 parseAssignOrExpStmt 方法
+    private StmtNode parseAssignOrExpStmt() {
+        // 使用新的、无副作用的先行查看来做决定
+        if (isAssignment()) {
+            // 确定是赋值语句，现在进行正式解析
+            LValNode lVal = parseLVal(false); // false表示这不是试探
+            Token assignToken = matchAndConsume(TokenType.ASSIGN, 'z');
+            ExpNode exp = parseExp();
+            Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+            recorder.recordSyntax("Stmt");
+            return new AssignStmtNode(lVal, assignToken, exp, semicn);
+        } else {
+            // 确定是表达式语句，直接解析
+            ExpNode exp = null;
+            if (peek().getType() != TokenType.SEMICN) {
+                exp = parseExp();
+            }
+            Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+            recorder.recordSyntax("Stmt");
+            return new ExpStmtNode(exp, semicn);
+        }
     }
 
     private CondNode parseCond() {
@@ -654,115 +657,85 @@ public class Parser {
         return new FuncRParamsNode(params, commas);
     }
 
+    // --- 最终修正版：全面应用“解析一个，记录一次”模式 ---
+
     private MulExpNode parseMulExp() {
-        // 先解析第一个必须存在的 UnaryExp
-        UnaryExpNode firstUnaryExp = parseUnaryExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<UnaryExpNode> followingUnaryExps = new ArrayList<>();
-
-        // 循环解析 { ('*' | '/' | '%') UnaryExp } 部分
-        while (peek().getType() == TokenType.MULT ||
-                peek().getType() == TokenType.DIV ||
-                peek().getType() == TokenType.MOD) {
-
-            // 保存运算符
-            operators.add(consume()); // 这里用 consume() 是安全的，因为 if 已检查
-
-            // 解析后面的 UnaryExp
-            followingUnaryExps.add(parseUnaryExp());
-        }
-
+        List<UnaryExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseUnaryExp());
         recorder.recordSyntax("MulExp");
-        return new MulExpNode(firstUnaryExp, operators, followingUnaryExps);
+        while (peek().getType() == TokenType.MULT || peek().getType() == TokenType.DIV || peek().getType() == TokenType.MOD) {
+            ops.add(consume());
+            exps.add(parseUnaryExp());
+            recorder.recordSyntax("MulExp");
+        }
+        return new MulExpNode(exps, ops);
+    }
+
+    private AddExpNode parseAddExp() {
+        List<MulExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseMulExp());
+        recorder.recordSyntax("AddExp");
+        while (peek().getType() == TokenType.PLUS || peek().getType() == TokenType.MINU) {
+            ops.add(consume());
+            exps.add(parseMulExp());
+            recorder.recordSyntax("AddExp");
+        }
+        return new AddExpNode(exps, ops);
     }
 
     private RelExpNode parseRelExp() {
-        // 1. 先解析一个优先级更低的 AddExp
-        AddExpNode firstAddExp = parseAddExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<AddExpNode> followingAddExps = new ArrayList<>();
-
-        // 2. 循环检查是否存在关系运算符
-        while (peek().getType() == TokenType.LSS ||
-                peek().getType() == TokenType.GRE ||
-                peek().getType() == TokenType.LEQ ||
-                peek().getType() == TokenType.GEQ) {
-
-            // 保存运算符
-            operators.add(consume());
-
-            // 解析运算符后面的 AddExp
-            followingAddExps.add(parseAddExp());
-        }
-
+        List<AddExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseAddExp());
         recorder.recordSyntax("RelExp");
-        return new RelExpNode(firstAddExp, operators, followingAddExps);
+        while (peek().getType() == TokenType.LSS || peek().getType() == TokenType.GRE ||
+                peek().getType() == TokenType.LEQ || peek().getType() == TokenType.GEQ) {
+            ops.add(consume());
+            exps.add(parseAddExp());
+            recorder.recordSyntax("RelExp");
+        }
+        return new RelExpNode(exps, ops);
     }
 
     private EqExpNode parseEqExp() {
-        // 1. 先解析一个优先级更低的 RelExp
-        RelExpNode firstRelExp = parseRelExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<RelExpNode> followingRelExps = new ArrayList<>();
-
-        // 2. 循环检查是否存在相等性运算符
-        while (peek().getType() == TokenType.EQL ||
-                peek().getType() == TokenType.NEQ) {
-
-            // 保存运算符
-            operators.add(consume());
-
-            // 解析运算符后面的 RelExp
-            followingRelExps.add(parseRelExp());
-        }
-
+        List<RelExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseRelExp());
         recorder.recordSyntax("EqExp");
-        return new EqExpNode(firstRelExp, operators, followingRelExps);
+        while (peek().getType() == TokenType.EQL || peek().getType() == TokenType.NEQ) {
+            ops.add(consume());
+            exps.add(parseRelExp());
+            recorder.recordSyntax("EqExp");
+        }
+        return new EqExpNode(exps, ops);
     }
 
     private LAndExpNode parseLAndExp() {
-        // 1. 先解析一个优先级更低的 EqExp
-        EqExpNode firstEqExp = parseEqExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<EqExpNode> followingEqExps = new ArrayList<>();
-
-        // 2. 循环检查是否存在逻辑与运算符
-        while (peek().getType() == TokenType.AND) {
-
-            // 保存运算符
-            operators.add(consume());
-
-            // 解析运算符后面的 EqExp
-            followingEqExps.add(parseEqExp());
-        }
-
+        List<EqExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseEqExp());
         recorder.recordSyntax("LAndExp");
-        return new LAndExpNode(firstEqExp, operators, followingEqExps);
+        while (peek().getType() == TokenType.AND) {
+            ops.add(consume());
+            exps.add(parseEqExp());
+            recorder.recordSyntax("LAndExp");
+        }
+        return new LAndExpNode(exps, ops);
     }
 
     private LOrExpNode parseLOrExp() {
-        // 1. 先解析一个优先级更低的 LAndExp
-        LAndExpNode firstLAndExp = parseLAndExp();
-
-        List<Token> operators = new ArrayList<>();
-        List<LAndExpNode> followingLAndExps = new ArrayList<>();
-
-        // 2. 循环检查是否存在逻辑或运算符
-        while (peek().getType() == TokenType.OR) {
-
-            // 保存运算符
-            operators.add(consume());
-
-            // 解析运算符后面的 LAndExp
-            followingLAndExps.add(parseLAndExp());
-        }
-
+        List<LAndExpNode> exps = new ArrayList<>();
+        List<Token> ops = new ArrayList<>();
+        exps.add(parseLAndExp());
         recorder.recordSyntax("LOrExp");
-        return new LOrExpNode(firstLAndExp, operators, followingLAndExps);
+        while (peek().getType() == TokenType.OR) {
+            ops.add(consume());
+            exps.add(parseLAndExp());
+            recorder.recordSyntax("LOrExp");
+        }
+        return new LOrExpNode(exps, ops);
     }
 
 }

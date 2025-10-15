@@ -6,14 +6,12 @@ import java.util.List;
 
 // 代表 LOrExp → LAndExp { '||' LAndExp }
 public class LOrExpNode extends ASTNode {
-    private final LAndExpNode firstLAndExp;
+    private final List<LAndExpNode> lAndExps;
     private final List<Token> operators;
-    private final List<LAndExpNode> followingLAndExps;
 
-    public LOrExpNode(LAndExpNode firstLAndExp, List<Token> operators, List<LAndExpNode> followingLAndExps) {
-        super(firstLAndExp.getLineNumber());
-        this.firstLAndExp = firstLAndExp;
+    public LOrExpNode(List<LAndExpNode> lAndExps, List<Token> operators) {
+        super(lAndExps.get(0).getLineNumber());
+        this.lAndExps = lAndExps;
         this.operators = operators;
-        this.followingLAndExps = followingLAndExps;
     }
 }

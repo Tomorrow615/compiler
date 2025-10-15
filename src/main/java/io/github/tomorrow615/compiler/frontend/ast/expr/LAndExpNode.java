@@ -6,14 +6,12 @@ import java.util.List;
 
 // 代表 LAndExp → EqExp { '&&' EqExp }
 public class LAndExpNode extends ASTNode {
-    private final EqExpNode firstEqExp;
+    private final List<EqExpNode> eqExps;
     private final List<Token> operators;
-    private final List<EqExpNode> followingEqExps;
 
-    public LAndExpNode(EqExpNode firstEqExp, List<Token> operators, List<EqExpNode> followingEqExps) {
-        super(firstEqExp.getLineNumber());
-        this.firstEqExp = firstEqExp;
+    public LAndExpNode(List<EqExpNode> eqExps, List<Token> operators) {
+        super(eqExps.get(0).getLineNumber());
+        this.eqExps = eqExps;
         this.operators = operators;
-        this.followingEqExps = followingEqExps;
     }
 }

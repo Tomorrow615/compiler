@@ -6,14 +6,12 @@ import java.util.List;
 
 // 代表 RelExp → AddExp { ('<' | '>' | '<=' | '>=') AddExp }
 public class RelExpNode extends ASTNode {
-    private final AddExpNode firstAddExp;
+    private final List<AddExpNode> addExps;
     private final List<Token> operators;
-    private final List<AddExpNode> followingAddExps;
 
-    public RelExpNode(AddExpNode firstAddExp, List<Token> operators, List<AddExpNode> followingAddExps) {
-        super(firstAddExp.getLineNumber());
-        this.firstAddExp = firstAddExp;
+    public RelExpNode(List<AddExpNode> addExps, List<Token> operators) {
+        super(addExps.get(0).getLineNumber());
+        this.addExps = addExps;
         this.operators = operators;
-        this.followingAddExps = followingAddExps;
     }
 }
