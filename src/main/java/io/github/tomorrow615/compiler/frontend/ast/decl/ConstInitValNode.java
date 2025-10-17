@@ -9,7 +9,8 @@ import java.util.List;
 public class ConstInitValNode extends ASTNode {
 
     public enum Type {
-        SINGLE, ARRAY
+        SINGLE,
+        ARRAY
     }
 
     private final Type type;

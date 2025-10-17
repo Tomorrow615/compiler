@@ -7,7 +7,8 @@ import java.util.List;
 
 public class InitValNode extends ASTNode {
     public enum Type {
-        SINGLE, ARRAY
+        SINGLE,
+        ARRAY
     }
 
     private final Type type;

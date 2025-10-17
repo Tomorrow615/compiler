@@ -21,98 +21,112 @@ public class StatementParser {
         this.expressionParser = expressionParser;
     }
 
+    // 语句块 Block → '{' { BlockItem } '}'
+    public BlockNode parseBlock() {
+        Token lBrace = mainParser.consume();
+        List<BlockItemNode> blockItems = new ArrayList<>();
+        while (mainParser.peek().getType() != TokenType.RBRACE) {
+            blockItems.add(this.parseBlockItem());
+        }
+        Token rBrace = mainParser.consume();
+        mainParser.getRecorder().recordSyntax("Block");
+        return new BlockNode(lBrace, blockItems, rBrace);
+    }
+
+    // 语句块项 BlockItem → Decl | Stmt
     public BlockItemNode parseBlockItem() {
         if (mainParser.peek().getType() == TokenType.CONSTTK ||
                 mainParser.peek().getType() == TokenType.INTTK ||
                 mainParser.peek().getType() == TokenType.STATICTK) {
-            // 声明的解析逻辑仍在主Parser中
             return mainParser.parseDecl();
         } else {
             return this.parseStmt();
         }
     }
 
+    // 语句 Stmt → LVal '=' Exp ';' // i
+    // | [Exp] ';' // i
+    // | Block
+    // | 'if' '(' Cond ')' Stmt [ 'else' Stmt ] // j
+    // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt
+    // | 'break' ';' // i
+    // | 'continue' ';' // i
+    // | 'return' [Exp] ';' // i
+    // | 'printf''('StringConst {','Exp}')'';' // i j
     public StmtNode parseStmt() {
         TokenType currentType = mainParser.peek().getType();
+        StmtNode parsedStmtNode;
 
         if (currentType == TokenType.LBRACE) {
-            BlockNode blockNode = this.parseBlock();
-            mainParser.getRecorder().recordSyntax("Stmt");
-            return blockNode;
+            parsedStmtNode = this.parseBlock();
         } else if (currentType == TokenType.IFTK) {
-            return this.parseIfStmt();
+            parsedStmtNode = this.parseIfStmt();
         } else if (currentType == TokenType.FORTK) {
-            return this.parseForStmt();
+            parsedStmtNode = this.parseForStmt();
         } else if (currentType == TokenType.BREAKTK) {
-            return this.parseBreakStmt();
+            parsedStmtNode = this.parseBreakStmt();
         } else if (currentType == TokenType.CONTINUETK) {
-            return this.parseContinueStmt();
+            parsedStmtNode = this.parseContinueStmt();
         } else if (currentType == TokenType.RETURNTK) {
-            return this.parseReturnStmt();
+            parsedStmtNode = this.parseReturnStmt();
         } else if (currentType == TokenType.PRINTFTK) {
-            return this.parsePrintfStmt();
+            parsedStmtNode = this.parsePrintfStmt();
         } else {
-            return this.parseAssignOrExpStmt();
-        }
-    }
-
-    public BlockNode parseBlock() {
-        Token lBrace = mainParser.matchAndConsume(TokenType.LBRACE, 'z');
-        List<BlockItemNode> blockItems = new ArrayList<>();
-
-        while (mainParser.peek().getType() != TokenType.RBRACE && mainParser.peek().getType() != TokenType.EOF) {
-            blockItems.add(this.parseBlockItem());
+            parsedStmtNode = this.parseAssignOrExpStmt();
         }
 
-        Token rBrace = mainParser.matchAndConsume(TokenType.RBRACE, 'z');
-        mainParser.getRecorder().recordSyntax("Block");
-        return new BlockNode(lBrace, blockItems, rBrace);
-    }
-
-    private StmtNode parseBreakStmt() {
-        Token breakToken = mainParser.matchAndConsume(TokenType.BREAKTK, 'z');
-        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
         mainParser.getRecorder().recordSyntax("Stmt");
-        return new BreakStmtNode(breakToken, semicn);
+        return parsedStmtNode;
     }
 
-    private StmtNode parseContinueStmt() {
-        Token continueToken = mainParser.matchAndConsume(TokenType.CONTINUETK, 'z');
-        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-        mainParser.getRecorder().recordSyntax("Stmt");
-        return new ContinueStmtNode(continueToken, semicn);
-    }
-
-    private StmtNode parseReturnStmt() {
-        Token returnToken = mainParser.matchAndConsume(TokenType.RETURNTK, 'z');
-        ExpNode exp = null;
-        if (mainParser.peek().getType() != TokenType.SEMICN) {
-            exp = expressionParser.parseExp();
-        }
-        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-        mainParser.getRecorder().recordSyntax("Stmt");
-        return new ReturnStmtNode(returnToken, exp, semicn);
-    }
-
+    // | 'if' '(' Cond ')' Stmt [ 'else' Stmt ] // j
     private StmtNode parseIfStmt() {
-        Token ifToken = mainParser.matchAndConsume(TokenType.IFTK, 'z');
-        Token lparen = mainParser.matchAndConsume(TokenType.LPARENT, 'j');
+        Token ifToken = mainParser.consume();
+        Token lparen = mainParser.consume();
         CondNode cond = expressionParser.parseCond();
         Token rparen = mainParser.matchAndConsume(TokenType.RPARENT, 'j');
         StmtNode thenStmt = this.parseStmt();
 
-        Token elseToken = null;
-        StmtNode elseStmt = null;
-
         if (mainParser.peek().getType() == TokenType.ELSETK) {
-            elseToken = mainParser.matchAndConsume(TokenType.ELSETK, 'z');
-            elseStmt = this.parseStmt();
+            Token elseToken = mainParser.consume();
+            StmtNode elseStmt = this.parseStmt();
+            return new IfStmtNode(ifToken, lparen, cond, rparen, thenStmt, elseToken, elseStmt);
+        } else {
+            return new IfStmtNode(ifToken, lparen, cond, rparen, thenStmt);
         }
-
-        mainParser.getRecorder().recordSyntax("Stmt");
-        return new IfStmtNode(ifToken, lparen, cond, rparen, thenStmt, elseToken, elseStmt);
     }
 
+    // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt
+    private StmtNode parseForStmt() {
+        Token forToken = mainParser.consume();
+        Token lparen = mainParser.consume();
+
+        ForSubStmtNode initStmt = null;
+        if (mainParser.peek().getType() != TokenType.SEMICN) {
+            initStmt = this.parseForSubStmt();
+        }
+
+        Token firstSemicn = mainParser.consume();
+
+        CondNode cond = null;
+        if (mainParser.peek().getType() != TokenType.SEMICN) {
+            cond = expressionParser.parseCond();
+        }
+
+        Token secondSemicn = mainParser.consume();
+
+        ForSubStmtNode updateStmt = null;
+        if (mainParser.peek().getType() != TokenType.RPARENT) {
+            updateStmt = this.parseForSubStmt();
+        }
+
+        Token rparen = mainParser.consume();
+        StmtNode bodyStmt = this.parseStmt();
+
+        return new ForStmtNode(forToken, lparen, initStmt, firstSemicn, cond, secondSemicn, updateStmt, rparen, bodyStmt);
+    }
+
+    // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp }
     private ForSubStmtNode parseForSubStmt() {
         List<LValNode> lVals = new ArrayList<>();
         List<Token> assignTokens = new ArrayList<>();
@@ -120,13 +134,13 @@ public class StatementParser {
         List<Token> commas = new ArrayList<>();
 
         lVals.add(mainParser.parseLVal(false));
-        assignTokens.add(mainParser.matchAndConsume(TokenType.ASSIGN, 'z'));
+        assignTokens.add(mainParser.consume());
         exps.add(expressionParser.parseExp());
 
         while (mainParser.peek().getType() == TokenType.COMMA) {
-            commas.add(mainParser.matchAndConsume(TokenType.COMMA, 'z'));
+            commas.add(mainParser.consume());
             lVals.add(mainParser.parseLVal(false));
-            assignTokens.add(mainParser.matchAndConsume(TokenType.ASSIGN, 'z'));
+            assignTokens.add(mainParser.consume());
             exps.add(expressionParser.parseExp());
         }
 
@@ -134,59 +148,54 @@ public class StatementParser {
         return new ForSubStmtNode(lVals, assignTokens, exps, commas);
     }
 
-    private StmtNode parseForStmt() {
-        Token forToken = mainParser.matchAndConsume(TokenType.FORTK, 'z');
-        Token lparen = mainParser.matchAndConsume(TokenType.LPARENT, 'j');
-
-        ForSubStmtNode initStmt = null;
-        if (mainParser.peek().getType() != TokenType.SEMICN) {
-            initStmt = this.parseForSubStmt();
-        }
-
-        Token firstSemicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-
-        CondNode cond = null;
-        if (mainParser.peek().getType() != TokenType.SEMICN) {
-            cond = expressionParser.parseCond();
-        }
-
-        Token secondSemicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-
-        ForSubStmtNode updateStmt = null;
-        if (mainParser.peek().getType() != TokenType.RPARENT) {
-            updateStmt = this.parseForSubStmt();
-        }
-
-        Token rparen = mainParser.matchAndConsume(TokenType.RPARENT, 'j');
-        StmtNode bodyStmt = this.parseStmt();
-
-        mainParser.getRecorder().recordSyntax("Stmt");
-        return new ForStmtNode(forToken, lparen, initStmt, firstSemicn, cond, secondSemicn, updateStmt, rparen, bodyStmt);
+    // | 'break' ';' // i
+    private StmtNode parseBreakStmt() {
+        Token breakToken = mainParser.consume();
+        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
+        return new BreakStmtNode(breakToken, semicn);
     }
 
+    // | 'continue' ';' // i
+    private StmtNode parseContinueStmt() {
+        Token continueToken = mainParser.consume();
+        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
+        return new ContinueStmtNode(continueToken, semicn);
+    }
+
+    // | 'return' [Exp] ';' // i
+    private StmtNode parseReturnStmt() {
+        Token returnToken = mainParser.consume();
+        ExpNode exp = null;
+        if (mainParser.peek().getType() != TokenType.SEMICN) {
+            exp = expressionParser.parseExp();
+        }
+        Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
+        return new ReturnStmtNode(returnToken, exp, semicn);
+    }
+
+    // | 'printf''('StringConst {','Exp}')'';' // i j
     private StmtNode parsePrintfStmt() {
-        Token printfToken = mainParser.matchAndConsume(TokenType.PRINTFTK, 'z');
-        Token lparen = mainParser.matchAndConsume(TokenType.LPARENT, 'j');
-        Token formatString = mainParser.matchAndConsume(TokenType.STRCON, 'z');
+        Token printfToken = mainParser.consume();
+        Token lparen = mainParser.consume();
+        Token formatString = mainParser.consume();
 
         List<Token> commas = new ArrayList<>();
         List<ExpNode> exps = new ArrayList<>();
 
         while (mainParser.peek().getType() == TokenType.COMMA) {
-            commas.add(mainParser.matchAndConsume(TokenType.COMMA, 'z'));
+            commas.add(mainParser.consume());
             exps.add(expressionParser.parseExp());
         }
 
         Token rparen = mainParser.matchAndConsume(TokenType.RPARENT, 'j');
         Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
 
-        mainParser.getRecorder().recordSyntax("Stmt");
         return new PrintfStmtNode(printfToken, lparen, formatString, commas, exps, rparen, semicn);
     }
 
     private boolean isAssignment() {
         int initialPos = mainParser.savePosition();
-        try { // 使用 try-finally 确保位置指针一定会被恢复
+        try {
             int tempPos = initialPos;
             if (tempPos >= mainParser.getTokens().size() || mainParser.getTokens().get(tempPos).getType() != TokenType.IDENFR) {
                 return false;
@@ -211,13 +220,14 @@ public class StatementParser {
         }
     }
 
+    // 语句 Stmt → LVal '=' Exp ';' // i
+    // | [Exp] ';' // i
     private StmtNode parseAssignOrExpStmt() {
         if (this.isAssignment()) {
             LValNode lVal = mainParser.parseLVal(false);
             Token assignToken = mainParser.matchAndConsume(TokenType.ASSIGN, 'z');
             ExpNode exp = expressionParser.parseExp();
             Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-            mainParser.getRecorder().recordSyntax("Stmt");
             return new AssignStmtNode(lVal, assignToken, exp, semicn);
         } else {
             ExpNode exp = null;
@@ -225,7 +235,6 @@ public class StatementParser {
                 exp = expressionParser.parseExp();
             }
             Token semicn = mainParser.matchAndConsume(TokenType.SEMICN, 'i');
-            mainParser.getRecorder().recordSyntax("Stmt");
             return new ExpStmtNode(exp, semicn);
         }
     }
