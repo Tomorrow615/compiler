@@ -267,14 +267,14 @@ public class Parser {
     private FuncDefNode parseFuncDef() {
         FuncTypeNode funcType = parseFuncType();
         Token ident = consume();
-        consume();
+        consume(); // (
 
         List<FuncFParamNode> funcFParams = new ArrayList<>();
-        if (peek().getType() != TokenType.RPARENT) {
+        if (peek().getType() == TokenType.INTTK) {
             funcFParams = parseFuncFParams();
         }
 
-        Token rparen = matchAndConsume(TokenType.RPARENT, 'j');
+        matchAndConsume(TokenType.RPARENT, 'j');
         BlockNode block = statementParser.parseBlock();
         recorder.recordSyntax("FuncDef");
         return new FuncDefNode(funcType, ident, funcFParams, block);
