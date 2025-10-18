@@ -3,7 +3,6 @@ package io.github.tomorrow615.compiler.frontend.lexer;
 import io.github.tomorrow615.compiler.frontend.error.ErrorReporter;
 import io.github.tomorrow615.compiler.util.*;
 
-import java.io.PrintWriter;
 import java.io.IOException;
 import java.io.PushbackReader;
 import java.io.StringReader;

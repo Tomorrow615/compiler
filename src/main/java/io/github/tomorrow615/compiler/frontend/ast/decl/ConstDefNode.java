@@ -7,19 +7,25 @@ import java.util.List;
 
 public class ConstDefNode extends ASTNode {
     private final Token ident;
-    private final List<Token> lBracks;
     private final List<ConstExpNode> constExps;
-    private final List<Token> rBracks;
-    private final Token assignToken; // '='
     private final ConstInitValNode constInitVal;
 
-    public ConstDefNode(Token ident, List<Token> lBracks, List<ConstExpNode> constExps, List<Token> rBracks, Token assignToken, ConstInitValNode constInitVal) {
+    public ConstDefNode(Token ident, List<ConstExpNode> constExps, ConstInitValNode constInitVal) {
         super(ident.getLineNumber());
         this.ident = ident;
-        this.lBracks = lBracks;
         this.constExps = constExps;
-        this.rBracks = rBracks;
-        this.assignToken = assignToken;
         this.constInitVal = constInitVal;
+    }
+
+    public Token getIdent() {
+        return ident;
+    }
+
+    public List<ConstExpNode> getConstExps() {
+        return constExps;
+    }
+
+    public ConstInitValNode getConstInitVal() {
+        return constInitVal;
     }
 }

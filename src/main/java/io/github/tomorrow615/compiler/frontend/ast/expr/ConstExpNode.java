@@ -9,4 +9,8 @@ public class ConstExpNode extends ASTNode {
         super(addExp.getLineNumber());
         this.addExp = addExp;
     }
+
+    public AddExpNode getAddExp() {
+        return addExp;
+    }
 }

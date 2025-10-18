@@ -1,19 +1,28 @@
 package io.github.tomorrow615.compiler.frontend.ast.decl;
 
-import io.github.tomorrow615.compiler.frontend.lexer.Token;
 import java.util.List;
 
 public class VarDeclNode extends DeclNode {
-    private final Token staticToken;
+    private final boolean isStatic;
     private final BTypeNode bType;
     private final List<VarDefNode> varDefs;
-    private final Token semicn;
 
-    public VarDeclNode(Token staticToken, BTypeNode bType, List<VarDefNode> varDefs, Token semicn) {
-        super(staticToken != null ? staticToken.getLineNumber() : bType.getLineNumber());
-        this.staticToken = staticToken;
+    public VarDeclNode(boolean isStatic, BTypeNode bType, List<VarDefNode> varDefs, int lineNumber) {
+        super(lineNumber);
+        this.isStatic = isStatic;
         this.bType = bType;
         this.varDefs = varDefs;
-        this.semicn = semicn;
+    }
+
+    public boolean isStatic() {
+        return isStatic;
+    }
+
+    public BTypeNode getbType() {
+        return bType;
+    }
+
+    public List<VarDefNode> getVarDefs() {
+        return varDefs;
     }
 }

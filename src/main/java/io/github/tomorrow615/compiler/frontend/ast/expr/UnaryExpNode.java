@@ -43,4 +43,28 @@ public class UnaryExpNode extends ASTNode {
         this.unaryOp = unaryOp;
         this.unaryExp = unaryExp;
     }
+
+    public Type getType() {
+        return type;
+    }
+
+    public PrimaryExpNode getPrimaryExp() {
+        return primaryExp;
+    }
+
+    public Token getIdent() {
+        return ident;
+    }
+
+    public FuncRParamsNode getFuncRParams() {
+        return funcRParams;
+    }
+
+    public UnaryOpNode getUnaryOp() {
+        return unaryOp;
+    }
+
+    public UnaryExpNode getUnaryExp() {
+        return unaryExp;
+    }
 }

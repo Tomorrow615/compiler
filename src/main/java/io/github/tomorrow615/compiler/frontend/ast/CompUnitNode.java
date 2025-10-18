@@ -17,4 +17,16 @@ public class CompUnitNode extends ASTNode {
         this.funcDefs = funcDefs;
         this.mainFuncDef = mainFuncDef;
     }
+
+    public List<DeclNode> getDecls() {
+        return decls;
+    }
+
+    public List<FuncDefNode> getFuncDefs() {
+        return funcDefs;
+    }
+
+    public MainFuncDefNode getMainFuncDef() {
+        return mainFuncDef;
+    }
 }

@@ -131,7 +131,7 @@ public class Parser {
 
     // 常量声明 ConstDecl → 'const' BType ConstDef { ',' ConstDef } ';' // i
     private ConstDeclNode parseConstDecl() {
-        Token constToken = consume();
+        consume();
         BTypeNode bType = parseBType();
         List<ConstDefNode> constDefs = new ArrayList<>();
         constDefs.add(parseConstDef());
@@ -141,11 +141,10 @@ public class Parser {
             constDefs.add(parseConstDef());
         }
 
-        Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+        matchAndConsume(TokenType.SEMICN, 'i');
         recorder.recordSyntax("ConstDecl");
-        return new ConstDeclNode(constToken, bType, constDefs, semicn);
+        return new ConstDeclNode(bType, constDefs);
     }
-
     // 基本类型 BType → 'int'
     private BTypeNode parseBType() {
         Token typeToken = consume();
@@ -157,20 +156,18 @@ public class Parser {
     // 这里支持多维数组，但 ConstInitVal 还需做对应调整
     private ConstDefNode parseConstDef() {
         Token ident = consume();
-        List<Token> lBracks = new ArrayList<>();
         List<ConstExpNode> constExps = new ArrayList<>();
-        List<Token> rBracks = new ArrayList<>();
 
         while (peek().getType() == TokenType.LBRACK) {
-            lBracks.add(consume());
+            consume();
             constExps.add(expressionParser.parseConstExp());
-            rBracks.add(matchAndConsume(TokenType.RBRACK, 'k'));
+            matchAndConsume(TokenType.RBRACK, 'k');
         }
 
-        Token assignToken = consume();
+        consume();
         ConstInitValNode constInitVal = parseConstInitVal();
         recorder.recordSyntax("ConstDef");
-        return new ConstDefNode(ident, lBracks, constExps, rBracks, assignToken, constInitVal);
+        return new ConstDefNode(ident, constExps, constInitVal);
     }
 
     // 常量初值 ConstInitVal → ConstExp | '{' [ ConstExp { ',' ConstExp } ] '}'
@@ -178,18 +175,17 @@ public class Parser {
         if (peek().getType() == TokenType.LBRACE) {
             Token lBrace = consume();
             List<ConstExpNode> arrayInit = new ArrayList<>();
-            List<Token> commas = new ArrayList<>();
 
             if (peek().getType() != TokenType.RBRACE) {
                 arrayInit.add(expressionParser.parseConstExp());
                 while (peek().getType() == TokenType.COMMA) {
-                    commas.add(consume());
+                    consume();
                     arrayInit.add(expressionParser.parseConstExp());
                 }
             }
             Token rBrace = consume();
             recorder.recordSyntax("ConstInitVal");
-            return new ConstInitValNode(lBrace, arrayInit, commas, rBrace);
+            return new ConstInitValNode(arrayInit, lBrace.getLineNumber());
         } else {
             ConstExpNode singleInit = expressionParser.parseConstExp();
             recorder.recordSyntax("ConstInitVal");
@@ -199,9 +195,12 @@ public class Parser {
 
     // 变量声明 VarDecl → [ 'static' ] BType VarDef { ',' VarDef } ';' // i
     private VarDeclNode parseVarDecl() {
-        Token staticToken = null;
+        boolean isStatic = false;
+        Token firstToken = peek();
+
         if (peek().getType() == TokenType.STATICTK) {
-            staticToken = consume();
+            isStatic = true;
+            consume();
         }
 
         BTypeNode bType = parseBType();
@@ -213,33 +212,31 @@ public class Parser {
             varDefs.add(parseVarDef());
         }
 
-        Token semicn = matchAndConsume(TokenType.SEMICN, 'i');
+        matchAndConsume(TokenType.SEMICN, 'i');
         recorder.recordSyntax("VarDecl");
-        return new VarDeclNode(staticToken, bType, varDefs, semicn);
+        return new VarDeclNode(isStatic, bType, varDefs, firstToken.getLineNumber());
     }
 
     // 变量定义 VarDef → Ident [ '[' ConstExp ']' ] | Ident [ '[' ConstExp ']' ] '=' InitVal // k
     // 同样支持多维数组，但对应的 InitVal 还需做对应调整
     private VarDefNode parseVarDef() {
         Token ident = consume();
-        List<Token> lBracks = new ArrayList<>();
         List<ConstExpNode> constExps = new ArrayList<>();
-        List<Token> rBracks = new ArrayList<>();
 
         while (peek().getType() == TokenType.LBRACK) {
-            lBracks.add(consume());
+            consume();
             constExps.add(expressionParser.parseConstExp());
-            rBracks.add(matchAndConsume(TokenType.RBRACK, 'k'));
+            matchAndConsume(TokenType.RBRACK, 'k');
         }
 
         if (peek().getType() == TokenType.ASSIGN) {
-            Token assignToken = consume();
+            consume();
             InitValNode initVal = parseInitVal();
             recorder.recordSyntax("VarDef");
-            return new VarDefNode(ident, lBracks, constExps, rBracks, assignToken, initVal);
+            return new VarDefNode(ident, constExps, initVal);
         } else {
             recorder.recordSyntax("VarDef");
-            return new VarDefNode(ident, lBracks, constExps, rBracks);
+            return new VarDefNode(ident, constExps);
         }
     }
 
@@ -248,18 +245,17 @@ public class Parser {
         if (peek().getType() == TokenType.LBRACE) {
             Token lBrace = consume();
             List<ExpNode> arrayInit = new ArrayList<>();
-            List<Token> commas = new ArrayList<>();
 
             if (peek().getType() != TokenType.RBRACE) {
                 arrayInit.add(expressionParser.parseExp());
                 while (peek().getType() == TokenType.COMMA) {
-                    commas.add(consume());
+                    consume();
                     arrayInit.add(expressionParser.parseExp());
                 }
             }
             Token rBrace = consume();
             recorder.recordSyntax("InitVal");
-            return new InitValNode(lBrace, arrayInit, commas, rBrace);
+            return new InitValNode(arrayInit, lBrace.getLineNumber());
         } else {
             ExpNode singleInit = expressionParser.parseExp();
             recorder.recordSyntax("InitVal");
@@ -271,9 +267,9 @@ public class Parser {
     private FuncDefNode parseFuncDef() {
         FuncTypeNode funcType = parseFuncType();
         Token ident = consume();
-        Token lparen = consume();
+        consume();
 
-        FuncFParamsNode funcFParams = null;
+        List<FuncFParamNode> funcFParams = new ArrayList<>();
         if (peek().getType() != TokenType.RPARENT) {
             funcFParams = parseFuncFParams();
         }
@@ -281,7 +277,7 @@ public class Parser {
         Token rparen = matchAndConsume(TokenType.RPARENT, 'j');
         BlockNode block = statementParser.parseBlock();
         recorder.recordSyntax("FuncDef");
-        return new FuncDefNode(funcType, ident, lparen, funcFParams, rparen, block);
+        return new FuncDefNode(funcType, ident, funcFParams, block);
     }
 
     // 函数类型 FuncType → 'void' | 'int'
@@ -292,18 +288,17 @@ public class Parser {
     }
 
     // 函数形参表 FuncFParams → FuncFParam { ',' FuncFParam }
-    private FuncFParamsNode parseFuncFParams() {
+    private List<FuncFParamNode> parseFuncFParams() {
         List<FuncFParamNode> params = new ArrayList<>();
-        List<Token> commas = new ArrayList<>();
         params.add(parseFuncFParam());
 
         while (peek().getType() == TokenType.COMMA) {
-            commas.add(consume());
+            consume();
             params.add(parseFuncFParam());
         }
 
         recorder.recordSyntax("FuncFParams");
-        return new FuncFParamsNode(params, commas);
+        return params;
     }
 
     // 函数形参 FuncFParam → BType Ident ['[' ']'] // k
@@ -312,10 +307,10 @@ public class Parser {
         Token ident = consume();
 
         if (peek().getType() == TokenType.LBRACK) {
-            Token lbrack = consume();
-            Token rbrack = matchAndConsume(TokenType.RBRACK, 'k');
+            consume();
+            matchAndConsume(TokenType.RBRACK, 'k');
             recorder.recordSyntax("FuncFParam");
-            return new FuncFParamNode(bType, ident, lbrack, rbrack);
+            return new FuncFParamNode(bType, ident, true);
         } else {
             recorder.recordSyntax("FuncFParam");
             return new FuncFParamNode(bType, ident);
@@ -325,40 +320,34 @@ public class Parser {
     // 主函数定义 MainFuncDef → 'int' 'main' '(' ')' Block // j
     private MainFuncDefNode parseMainFuncDef() {
         Token intToken = consume();
-        Token mainToken = consume();
-        Token lparen = consume();
-        Token rparen = matchAndConsume(TokenType.RPARENT, 'j');
+        consume();
+        consume();
+        matchAndConsume(TokenType.RPARENT, 'j');
         BlockNode block = statementParser.parseBlock();
         recorder.recordSyntax("MainFuncDef");
-        return new MainFuncDefNode(intToken, mainToken, lparen, rparen, block);
+        return new MainFuncDefNode(block, intToken.getLineNumber());
     }
 
     // 左值表达式 LVal → Ident ['[' Exp ']'] // k
     // 可以支持 a[i][j][k]
-    public LValNode parseLVal(boolean isSpeculative) {
+    public LValNode parseLVal() {
         Token ident = consume();
 
         if (peek().getType() == TokenType.LBRACK) {
             // 是数组元素
-            List<Token> lBracks = new ArrayList<>();
             List<ExpNode> arrayExps = new ArrayList<>();
-            List<Token> rBracks = new ArrayList<>();
 
             while (peek().getType() == TokenType.LBRACK) {
-                lBracks.add(consume());
+                consume();
                 arrayExps.add(expressionParser.parseExp());
-                rBracks.add(matchAndConsume(TokenType.RBRACK, 'k'));
+                matchAndConsume(TokenType.RBRACK, 'k');
             }
 
-            if (!isSpeculative) {
-                recorder.recordSyntax("LVal");
-            }
-            return new LValNode(ident, lBracks, arrayExps, rBracks);
+            recorder.recordSyntax("LVal");
+            return new LValNode(ident, arrayExps);
         } else {
             // 是普通变量
-            if (!isSpeculative) {
-                recorder.recordSyntax("LVal");
-            }
+            recorder.recordSyntax("LVal");
             return new LValNode(ident);
         }
     }

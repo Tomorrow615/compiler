@@ -25,10 +25,6 @@ public class Token {
         return lineNumber;
     }
 
-    /**
-     * 此方法用于格式化输出到 lexer.txt.
-     * @return 符合评测格式的字符串.
-     */
     public String formatForOutput() {
         return this.type.name() + " " + this.text;
     }

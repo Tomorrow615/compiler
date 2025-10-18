@@ -4,7 +4,9 @@ import io.github.tomorrow615.compiler.frontend.ast.ASTNode;
 
 public class PrimaryExpNode extends ASTNode {
     public enum Type {
-        PAREN_EXP, LVAL, NUMBER
+        PAREN_EXP,
+        LVAL,
+        NUMBER
     }
     private final Type type;
     private final ExpNode exp; // for (Exp)
@@ -33,5 +35,21 @@ public class PrimaryExpNode extends ASTNode {
         this.exp = null;
         this.lval = null;
         this.number = number;
+    }
+
+    public Type getType() {
+        return type;
+    }
+
+    public ExpNode getExp() {
+        return exp;
+    }
+
+    public LValNode getLval() {
+        return lval;
+    }
+
+    public NumberNode getNumber() {
+        return number;
     }
 }

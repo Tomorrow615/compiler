@@ -1,17 +1,16 @@
 package io.github.tomorrow615.compiler.frontend.ast.stmt;
 
 import io.github.tomorrow615.compiler.frontend.ast.expr.ExpNode;
-import io.github.tomorrow615.compiler.frontend.lexer.Token;
 
 public class ReturnStmtNode extends StmtNode {
-    private final Token returnToken;
-    private final ExpNode exp; // 可能为 null
-    private final Token semicn;
+    private final ExpNode exp;
 
-    public ReturnStmtNode(Token returnToken, ExpNode exp, Token semicn) {
-        super(returnToken.getLineNumber());
-        this.returnToken = returnToken;
+    public ReturnStmtNode(ExpNode exp, int lineNumber) {
+        super(lineNumber);
         this.exp = exp;
-        this.semicn = semicn;
+    }
+
+    public ExpNode getExp() {
+        return exp;
     }
 }

@@ -10,4 +10,8 @@ public class NumberNode extends ASTNode {
         super(intConst.getLineNumber());
         this.intConst = intConst;
     }
+
+    public Token getIntConst() {
+        return intConst;
+    }
 }
