@@ -219,7 +219,7 @@ public class Lexer {
                 } else {
                     // 这是错误的单个 '&'
                     ErrorReporter.addError(currentLine, 'a'); // 报告 a 类错误
-                    return getNextToken(); // 忽略非法符号，继续分析下一个
+                    return new Token(TokenType.AND, tokenText.toString(), null, currentLine);
                 }
             case '|':
                 if (peekChar() == '|') {
@@ -230,7 +230,7 @@ public class Lexer {
                 } else {
                     // 这是错误的单个 '|'
                     ErrorReporter.addError(currentLine, 'a'); // 报告 a 类错误
-                    return getNextToken(); // 忽略非法符号，继续分析下一个
+                    return new Token(TokenType.OR, tokenText.toString(), null, currentLine);
                 }
             default:
                 return getNextToken();

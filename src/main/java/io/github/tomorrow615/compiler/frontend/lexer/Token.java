@@ -21,6 +21,10 @@ public class Token {
         return text;
     }
 
+    public Object getValue() {
+        return value;
+    }
+
     public int getLineNumber() {
         return lineNumber;
     }
