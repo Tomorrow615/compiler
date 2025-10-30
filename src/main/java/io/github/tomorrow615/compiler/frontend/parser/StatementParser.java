@@ -28,9 +28,9 @@ public class StatementParser {
         while (mainParser.peek().getType() != TokenType.RBRACE) {
             blockItems.add(this.parseBlockItem());
         }
-        mainParser.consume();
+        Token rBrace = mainParser.consume();
         mainParser.getRecorder().recordSyntax("Block");
-        return new BlockNode(blockItems, lBrace.getLineNumber());
+        return new BlockNode(blockItems, lBrace.getLineNumber(), rBrace.getLineNumber());
     }
 
     // 语句块项 BlockItem → Decl | Stmt

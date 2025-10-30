@@ -3,13 +3,11 @@ package io.github.tomorrow615.compiler;
 import io.github.tomorrow615.compiler.frontend.error.*;
 import io.github.tomorrow615.compiler.frontend.lexer.*;
 import io.github.tomorrow615.compiler.frontend.ast.*;
-import io.github.tomorrow615.compiler.util.Config;
 import io.github.tomorrow615.compiler.frontend.parser.Parser;
 import io.github.tomorrow615.compiler.frontend.error.Error;
 import io.github.tomorrow615.compiler.util.*;
+import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
 
-import java.io.OutputStream;
-import java.io.PrintWriter;
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -22,6 +20,7 @@ public class Compiler {
         String inputFile = "testfile.txt";
         String outputFileLexer = "lexer.txt";
         String outputFileParser = "parser.txt";
+        String outputFileSymbol = "symbol.txt";
         String outputFileError = "error.txt";
 
         try {
@@ -36,14 +35,21 @@ public class Compiler {
             }
 
             // --- 步骤 2: 语法分析 ---
+            CompUnitNode compUnit;
             try (ParserRecorder parserRecorder = new ParserRecorder(outputFileParser)) {
                 Parser parser = new Parser(tokens, parserRecorder);
-                parser.parse();
+                compUnit = parser.parse();
             }
 
-            // --- 步骤 3: 检查错误并生成输出 ---
+            // --- 步骤 3: 语义分析 ---
+            SemanticVisitor semanticVisitor = new SemanticVisitor();
+            semanticVisitor.visit(compUnit);
+            try (SymbolRecorder symbolRecorder = new SymbolRecorder(outputFileSymbol)) {
+                symbolRecorder.recordAll(semanticVisitor.getAllScopes());
+            }
+
+            // --- 步骤 4: 检查错误并输出 ---
             if (ErrorReporter.hasErrors()) {
-                // 如果有错误，则只输出 error.txt
                 try (BufferedWriter errorWriter = new BufferedWriter(new FileWriter(outputFileError))) {
                     for (Error error : ErrorReporter.getErrors()) {
                         errorWriter.write(error.formatForOutput());
@@ -52,7 +58,6 @@ public class Compiler {
                 }
             }
         } catch (IOException e) {
-            // 统一处理所有可能的文件读写异常
             System.err.println("文件读写时发生错误: " + e.getMessage());
             e.printStackTrace();
         }

@@ -12,10 +12,8 @@ public class LexerRecorder implements AutoCloseable {
 
     public LexerRecorder(String outputFilename) throws IOException {
         if (Config.ENABLE_LEXER_OUTPUT) {
-            // 如果开关打开，创建真正的文件写入器。
             this.writer = new PrintWriter(new FileWriter(outputFilename));
         } else {
-            // 如果开关关闭，创建“黑洞”写入器，它会丢弃所有输出。
             this.writer = new PrintWriter(OutputStream.nullOutputStream());
         }
     }

@@ -1,6 +1,7 @@
 package io.github.tomorrow615.compiler.util;
 
 import io.github.tomorrow615.compiler.frontend.lexer.*;
+
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -13,10 +14,8 @@ public class ParserRecorder implements AutoCloseable {
 
     public ParserRecorder(String outputFilename) throws IOException {
         if (Config.ENABLE_PARSER_OUTPUT) {
-            // 如果开关打开，创建真正的文件写入器
             this.writer = new PrintWriter(new FileWriter(outputFilename));
         } else {
-            // 如果开关关闭，创建“黑洞”写入器
             this.writer = new PrintWriter(OutputStream.nullOutputStream());
         }
     }
@@ -35,7 +34,6 @@ public class ParserRecorder implements AutoCloseable {
 
     @Override
     public void close() {
-        // try-with-resources 会自动调用这个方法来关闭 writer
         writer.close();
     }
 }
