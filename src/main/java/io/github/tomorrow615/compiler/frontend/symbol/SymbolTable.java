@@ -40,6 +40,18 @@ public class SymbolTable {
         return true;
     }
 
+    // 这个方法用于添加内置函数，如 getint 和 printf
+    // 它们需要被查找到 (添加到 'symbols')
+    // 但不应该被输出到 symbol.txt (不添加到 'orderedSymbols')
+    public void addBuiltInSymbol(Symbol symbol) {
+        String name = symbol.getName();
+        // 假设内置函数不会重定义
+        if (!symbols.containsKey(name)) {
+            symbols.put(name, symbol);
+        }
+        // 注意：我们 *不* 调用 orderedSymbols.add(symbol);
+    }
+
     public Symbol lookup(String name) {
         // 1. 先在当前作用域查找
         Symbol symbol = symbols.get(name);

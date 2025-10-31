@@ -93,53 +93,124 @@ public class ExpressionVisitor {
 
     public SymbolType visitLOrExp(LOrExpNode node) {
         if (node == null) return null;
-        for (LAndExpNode landExp : node.getlAndExps()) {
-            visitLAndExp(landExp); // 递归访问
+
+        // 访问第一个子节点
+        SymbolType firstType = visitLAndExp(node.getlAndExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '||')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getlAndExps().size(); i++) {
+                visitLAndExp(node.getlAndExps().get(i));
+            }
+            // (P3 简化) 逻辑运算的结果视为 Int (1 或 0)
+            return SymbolType.Int;
         }
-        // (P3 简化) 逻辑运算的结果视为 Int (1 或 0)
-        return SymbolType.Int;
     }
 
     public SymbolType visitLAndExp(LAndExpNode node) {
         if (node == null) return null;
-        for (EqExpNode eqExp : node.getEqExps()) {
-            visitEqExp(eqExp); // 递归访问
+
+        // 访问第一个子节点
+        SymbolType firstType = visitEqExp(node.getEqExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '&&')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getEqExps().size(); i++) {
+                visitEqExp(node.getEqExps().get(i));
+            }
+            // 逻辑运算的结果视为 Int
+            return SymbolType.Int;
         }
-        return SymbolType.Int;
     }
 
     public SymbolType visitEqExp(EqExpNode node) {
         if (node == null) return null;
-        for (RelExpNode relExp : node.getRelExps()) {
-            visitRelExp(relExp); // 递归访问
+
+        // 访问第一个子节点
+        SymbolType firstType = visitRelExp(node.getRelExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '==')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getRelExps().size(); i++) {
+                visitRelExp(node.getRelExps().get(i));
+            }
+            // 相等性运算的结果视为 Int
+            return SymbolType.Int;
         }
-        return SymbolType.Int;
     }
 
     public SymbolType visitRelExp(RelExpNode node) {
         if (node == null) return null;
-        for (AddExpNode addExp : node.getAddExps()) {
-            visitAddExp(addExp); // 递归访问
+
+        // 访问第一个子节点
+        SymbolType firstType = visitAddExp(node.getAddExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '<')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getAddExps().size(); i++) {
+                visitAddExp(node.getAddExps().get(i));
+            }
+            // 关系运算的结果视为 Int
+            return SymbolType.Int;
         }
-        return SymbolType.Int;
     }
 
     public SymbolType visitAddExp(AddExpNode node) {
         if (node == null) return null;
-        for (MulExpNode mulExp : node.getMulExps()) {
-            // (P3 任务) 递归访问并检查类型是否为 Int
-            visitMulExp(mulExp);
+
+        // 访问第一个子节点
+        SymbolType firstType = visitMulExp(node.getMulExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '+')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getMulExps().size(); i++) {
+                visitMulExp(node.getMulExps().get(i));
+                // (P3 任务: 检查 firstType 和其他类型是否为 Int)
+            }
+            // 算术运算的结果视为 Int
+            return SymbolType.Int;
         }
-        // (P3 简化) 算术运算的结果视为 Int
-        return SymbolType.Int;
     }
 
     public SymbolType visitMulExp(MulExpNode node) {
         if (node == null) return null;
-        for (UnaryExpNode unaryExp : node.getUnaryExps()) {
-            visitUnaryExp(unaryExp); // 递归访问
+
+        // 访问第一个子节点
+        SymbolType firstType = visitUnaryExp(node.getUnaryExps().get(0));
+
+        if (node.getOperators().isEmpty()) {
+            // 没有运算符 (如 '*')，这是一个"直通"节点
+            // 返回子节点的真实类型
+            return firstType;
+        } else {
+            // 有运算符，访问其他子节点
+            for (int i = 1; i < node.getUnaryExps().size(); i++) {
+                visitUnaryExp(node.getUnaryExps().get(i));
+                // (P3 任务: 检查 firstType 和其他类型是否为 Int)
+            }
+            // 算术运算的结果视为 Int
+            return SymbolType.Int;
         }
-        return SymbolType.Int;
     }
 
     /**
@@ -186,7 +257,9 @@ public class ExpressionVisitor {
                         SymbolType actualType = visitExp(actualParams.get(i)); // 递归调用，获取实参类型
 
                         // 检查类型是否匹配
-                        if (actualType != null && !expectedType.equals(actualType)) {
+                        // --- 修改开始 ---
+                        if (actualType != null && !areTypesCompatible(expectedType, actualType)) {
+                            // --- 修改结束 ---
                             // (e.g., 期望 Int, 得到了 IntArray, 或者反之)
                             ErrorReporter.addError(node.getIdent().getLineNumber(), 'e');
                         }
@@ -219,5 +292,36 @@ public class ExpressionVisitor {
                 return SymbolType.Int; // Number 总是 Int
         }
         return null;
+    }
+
+    /**
+     * 检查函数参数类型是否兼容。
+     * e.g., ConstInt 和 StaticInt 都可以兼容 Int。
+     * ConstIntArray 和 StaticIntArray 都可以兼容 IntArray。
+     */
+    // 位于 ExpressionVisitor.java
+    private boolean areTypesCompatible(SymbolType expected, SymbolType actual) {
+        if (expected == null || actual == null) {
+            return false;
+        }
+
+        // 规则 1: 期望 Int (标量)
+        if (expected == SymbolType.Int) {
+            // 普通常量 (ConstInt) 和 静态变量 (StaticInt) 都可以传递
+            return actual == SymbolType.Int ||
+                    actual == SymbolType.ConstInt ||
+                    actual == SymbolType.StaticInt;
+        }
+
+        // 规则 2: 期望 IntArray (数组)
+        if (expected == SymbolType.IntArray) {
+            // 根据规范 ，普通常量数组 (ConstIntArray) *不可以* 传递
+            // 静态数组 (StaticIntArray) 可以传递
+            return actual == SymbolType.IntArray ||
+                    actual == SymbolType.StaticIntArray;
+        }
+
+        // 默认规则：对于 VoidFunc 等其他类型，使用严格相等
+        return expected.equals(actual);
     }
 }

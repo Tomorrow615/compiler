@@ -70,6 +70,16 @@ public class SemanticVisitor {
     public void visit(CompUnitNode compUnit) {
         enterScope(); // 创建并进入全局作用域 (id=1)
 
+        // --- 在这里添加 ---
+        // 注册内置函数 getint()
+        FuncSymbol getintFunc = new FuncSymbol("getint", SymbolType.IntFunc, 0);
+        currentScope.addBuiltInSymbol(getintFunc); // <-- 使用新方法
+
+        // 注册内置函数 printf()
+        FuncSymbol printfFunc = new FuncSymbol("printf", SymbolType.VoidFunc, 0);
+        currentScope.addBuiltInSymbol(printfFunc); // <-- 使用新方法
+        // --- 添加结束 ---
+
         for (DeclNode decl : compUnit.getDecls()) {
             visitDecl(decl);
         }

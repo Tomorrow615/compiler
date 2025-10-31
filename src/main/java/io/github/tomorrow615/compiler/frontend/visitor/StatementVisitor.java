@@ -156,7 +156,7 @@ public class StatementVisitor {
     public void visitReturnStmt(ReturnStmtNode node) {
         FuncSymbol func = hub.getCurrentFunction();
         if (func == null) {
-            return; // 理论上不应发生 (除非全局 return)
+            return;
         }
 
         boolean hasExp = (node.getExp() != null);
@@ -166,11 +166,12 @@ public class StatementVisitor {
         if (hasExp && !expectsExp) {
             // void func() { return 1; }
             ErrorReporter.addError(node.getLineNumber(), 'f');
-        } else if (!hasExp && expectsExp) {
-            // int func() { return; }
-            // (SysY 规范中，int func() { return; } 也是错误 f)
-            ErrorReporter.addError(node.getLineNumber(), 'f');
         }
+        // else if (!hasExp && expectsExp) {
+        //     // int func() { return; }
+        //     // *** 删除这个 else if 块 ***
+        //     // 根据规范, int 函数不报 f 错误, 仅在末尾检查 g 错误。
+        // }
 
         // 访问 return 后的表达式 (如果有)
         if (hasExp) {
