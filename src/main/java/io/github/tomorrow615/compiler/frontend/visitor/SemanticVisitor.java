@@ -8,6 +8,7 @@ import io.github.tomorrow615.compiler.frontend.ast.expr.*;
 import io.github.tomorrow615.compiler.frontend.error.ErrorReporter;
 import io.github.tomorrow615.compiler.frontend.lexer.*;
 import io.github.tomorrow615.compiler.frontend.symbol.*;
+import io.github.tomorrow615.compiler.frontend.visitor.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -68,22 +69,16 @@ public class SemanticVisitor {
 
     // 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef
     public void visit(CompUnitNode compUnit) {
-        enterScope(); // 创建并进入全局作用域 (id=1)
+        enterScope(); // id=1
 
-        // --- 在这里添加 ---
-        // 注册内置函数 getint()
         FuncSymbol getintFunc = new FuncSymbol("getint", SymbolType.IntFunc, 0);
-        currentScope.addBuiltInSymbol(getintFunc); // <-- 使用新方法
-
-        // 注册内置函数 printf()
+        currentScope.addBuiltInSymbol(getintFunc);
         FuncSymbol printfFunc = new FuncSymbol("printf", SymbolType.VoidFunc, 0);
-        currentScope.addBuiltInSymbol(printfFunc); // <-- 使用新方法
-        // --- 添加结束 ---
+        currentScope.addBuiltInSymbol(printfFunc);
 
         for (DeclNode decl : compUnit.getDecls()) {
             visitDecl(decl);
         }
-
         for (FuncDefNode funcDef : compUnit.getFuncDefs()) {
             visitFuncDef(funcDef);
         }
@@ -110,12 +105,9 @@ public class SemanticVisitor {
     // 常量定义 ConstDef → Ident [ '[' ConstExp ']' ] '=' ConstInitVal // b
     private void visitConstDef(ConstDefNode node) {
         Token ident = node.getIdent();
-        // 维度 > 0 表示数组，否则为标量
         int dimension = node.getConstExps().size();
-
         SymbolType type = (dimension > 0) ?
                 SymbolType.ConstIntArray : SymbolType.ConstInt;
-
         ValueSymbol symbol = new ValueSymbol(ident.getText(), type, ident.getLineNumber(), dimension);
 
         boolean success = currentScope.addSymbol(symbol);
@@ -136,14 +128,12 @@ public class SemanticVisitor {
     private void visitVarDef(VarDefNode node, boolean isStatic) {
         Token ident = node.getIdent();
         int dimension = node.getDimension();
-
         SymbolType type;
         if (isStatic) {
             type = (dimension > 0) ? SymbolType.StaticIntArray : SymbolType.StaticInt;
         } else {
             type = (dimension > 0) ? SymbolType.IntArray : SymbolType.Int;
         }
-
         ValueSymbol symbol = new ValueSymbol(ident.getText(), type, ident.getLineNumber(), dimension);
 
         boolean success = currentScope.addSymbol(symbol);
@@ -156,10 +146,8 @@ public class SemanticVisitor {
     public void visitFuncDef(FuncDefNode node) {
         Token ident = node.getIdent();
         TokenType funcTypeToken = node.getFuncType().getTypeToken().getType();
-
         SymbolType type = (funcTypeToken == TokenType.VOIDTK) ?
                 SymbolType.VoidFunc : SymbolType.IntFunc;
-
         FuncSymbol funcSymbol = new FuncSymbol(ident.getText(), type, ident.getLineNumber());
 
         boolean success = currentScope.addSymbol(funcSymbol);
@@ -169,39 +157,31 @@ public class SemanticVisitor {
             Symbol existing = currentScope.lookup(ident.getText());
             if (existing instanceof FuncSymbol) {
                 funcSymbol = (FuncSymbol) existing;
-            } else {
-                // 名字冲突，但不是函数，创建一个临时的继续分析
-                funcSymbol = new FuncSymbol(ident.getText(), type, ident.getLineNumber());
             }
         }
 
         setCurrentFunction(funcSymbol);
         enterScope(); // 进入函数的新作用域
-
+        // 遍历形参
         for (FuncFParamNode paramNode : node.getFuncFParams()) {
             Token paramIdent = paramNode.getIdent();
             boolean isArray = (paramNode.getType() == FuncFParamNode.Type.ARRAY);
             SymbolType paramType = isArray ? SymbolType.IntArray : SymbolType.Int;
             int dimension = isArray ? 1 : 0;
-
             ValueSymbol paramSymbol = new ValueSymbol(paramIdent.getText(), paramType,
                     paramIdent.getLineNumber(), dimension);
 
-            // 1. 添加到 FuncSymbol 中，用于d,e类错误检查
             funcSymbol.addParameter(paramSymbol);
 
             // 2. 添加到函数作用域中
             boolean paramSuccess = currentScope.addSymbol(paramSymbol);
             if (!paramSuccess) {
-                // 错误 b: 名字重定义 (形参)
-                ErrorReporter.addError(paramIdent.getLineNumber(), 'b');
+                ErrorReporter.addError(paramIdent.getLineNumber(), 'b'); // 名字重定义 (形参)
             }
         }
 
-        // 委托 StatementVisitor 处理函数体
         BlockNode funcBody = node.getBlock();
         stmtVisitor.visitBlock(funcBody);
-
 
         if (funcSymbol.getReturnType() == SymbolType.IntFunc) {
             boolean hasReturn = false;
@@ -212,13 +192,11 @@ public class SemanticVisitor {
                     hasReturn = true;
                 }
             }
-
             if (!hasReturn) {
                 ErrorReporter.addError(funcBody.getEndLineNumber(), 'g');
             }
         }
-
-        exitScope(); // 退出函数作用域
+        exitScope();
         setCurrentFunction(null);
     }
 
@@ -226,15 +204,11 @@ public class SemanticVisitor {
     public void visitMainFuncDef(MainFuncDefNode node) {
         // 创建一个临时的 FuncSymbol 来表示 main，用于 f/g 类错误检查
         FuncSymbol mainSymbol = new FuncSymbol("main", SymbolType.IntFunc, node.getLineNumber());
-
         setCurrentFunction(mainSymbol);
-        enterScope(); // 进入 main 的新作用域
-
-        // 委托 StatementVisitor 处理 main 的函数体
+        enterScope();
         BlockNode mainBody = node.getBlock();
         stmtVisitor.visitBlock(mainBody);
 
-        // 检查错误 'g'
         if (mainSymbol.getReturnType() == SymbolType.IntFunc) {
             boolean hasReturn = false;
             List<BlockItemNode> items = mainBody.getBlockItems();
@@ -244,13 +218,11 @@ public class SemanticVisitor {
                     hasReturn = true;
                 }
             }
-
             if (!hasReturn) {
                 ErrorReporter.addError(mainBody.getEndLineNumber(), 'g');
             }
         }
-
-        exitScope(); // 退出 main 的作用域
+        exitScope();
         setCurrentFunction(null);
     }
 

@@ -8,6 +8,7 @@ import io.github.tomorrow615.compiler.frontend.ast.expr.*;
 import io.github.tomorrow615.compiler.frontend.error.ErrorReporter;
 import io.github.tomorrow615.compiler.frontend.lexer.*;
 import io.github.tomorrow615.compiler.frontend.symbol.*;
+import io.github.tomorrow615.compiler.frontend.visitor.*;
 
 public class StatementVisitor {
     private final SemanticVisitor hub;
@@ -30,14 +31,21 @@ public class StatementVisitor {
         }
     }
 
+    // 语句 Stmt →
+    // | LVal '=' Exp ';' // h
+    // | [Exp] ';'
+    // | Block
+    // | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
+    // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt // h
+    // | 'break' ';' | 'continue' ';' // m
+    // | 'return' [Exp] ';' // f
+    // | 'printf''('StringConst {','Exp}')'';' // l
     public void visitStmt(StmtNode node) {
         if (node == null) return;
 
         if (node instanceof BlockNode b) {
-            // 这是一个 *嵌套* 的语句块, e.g., if (...) { ... }
-            // 它需要创建自己的作用域
             hub.enterScope();
-            visitBlock(b); // 遍历块的内容
+            visitBlock(b);
             hub.exitScope();
         }
         else if (node instanceof AssignStmtNode a) {
@@ -66,93 +74,88 @@ public class StatementVisitor {
         }
     }
 
+    // | LVal '=' Exp ';' // h
     public void visitAssignStmt(AssignStmtNode node) {
-        // 1. (P3 修改) 访问 LVal 以获取 *Symbol* (用于 'h' 检查)
-        Symbol symbol = hub.getExprVisitor().visitLVal_for_Symbol(node.getlVal());
-
-        // 2. 检查错误 'h'
-        if (symbol != null && symbol instanceof ValueSymbol vs && vs.isConst()) {
-            ErrorReporter.addError(node.getLineNumber(), 'h');
+        LValAnalysis lvalInfo = hub.getExprVisitor().visitLVal(node.getlVal());
+        // 检查错误 'h'
+        if (lvalInfo.symbol() instanceof ValueSymbol) {
+            ValueSymbol vs = (ValueSymbol) lvalInfo.symbol();
+            if (vs.isConst()) {
+                ErrorReporter.addError(node.getLineNumber(), 'h');
+            }
         }
-
-        // 3. (P3 修改) 递归访问 node.getExp() 以推导其类型并检查内部错误
+        // 未来递归访问 node.getExp() 以推导其类型并检查内部错误
         if (node.getExp() != null) {
-            // (P3 任务：获取类型并与 LVal 比较)
-            SymbolType lvalType = hub.getExprVisitor().visitLVal_for_Type(node.getlVal());
             SymbolType expType = hub.getExprVisitor().visitExp(node.getExp());
-
-            // (未来任务：检查 lvalType 和 expType 是否匹配)
+            // SymbolType lvalType = lvalInfo.resultingType();
         }
     }
 
+    // | [Exp] ';'
     public void visitExpStmt(ExpStmtNode node) {
         if (node.getExp() != null) {
             hub.getExprVisitor().visitExp(node.getExp());
         }
     }
 
+    // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt // h
+    // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp } // h
     public void visitForStmt(ForStmtNode node) {
         if (node.getInitStmt() != null) {
             visitForSubStmt(node.getInitStmt());
         }
         if (node.getCond() != null) {
-            // 委托给 ExpressionVisitor 访问条件
             hub.getExprVisitor().visitCond(node.getCond());
         }
         if (node.getUpdateStmt() != null) {
             visitForSubStmt(node.getUpdateStmt());
         }
 
-        // 关键：管理循环层级
         hub.incrementLoopDepth();
-        visitStmt(node.getBodyStmt()); // 递归访问循环体
+        visitStmt(node.getBodyStmt());
         hub.decrementLoopDepth();
     }
 
+    // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp } // h
     public void visitForSubStmt(ForSubStmtNode node) {
         if (node == null) return;
-
         for (int i = 0; i < node.getLVals().size(); i++) {
-            // 1. (P3 修改) 访问 LVal 以获取 *Symbol* (用于 'h' 检查)
-            Symbol symbol = hub.getExprVisitor().visitLVal_for_Symbol(node.getLVals().get(i));
+            LValAnalysis lvalInfo = hub.getExprVisitor().visitLVal(node.getLVals().get(i));
 
-            // 2. 检查 'h' (常量赋值)
-            if (symbol != null && symbol instanceof ValueSymbol vs && vs.isConst()) {
-                ErrorReporter.addError(node.getLVals().get(i).getLineNumber(), 'h');
+            if (lvalInfo.symbol() instanceof ValueSymbol) {
+                ValueSymbol vs = (ValueSymbol) lvalInfo.symbol();
+                if (vs.isConst()) {
+                    ErrorReporter.addError(node.getLVals().get(i).getLineNumber(), 'h');
+                }
             }
-
-            // 3. (P3 修改) 访问 Exp (推导类型并检查内部错误)
             hub.getExprVisitor().visitExp(node.getExps().get(i));
         }
     }
 
+    // // | 'if' '(' Cond ')' Stmt [ 'else' Stmt ]
     public void visitIfStmt(IfStmtNode node) {
-        // 1. 访问条件 (这会递归触发 ExprVisitor 检查 'c', 'd' 等)
         hub.getExprVisitor().visitCond(node.getCond());
-
-        // 2. 访问 then 语句
         visitStmt(node.getThenStmt());
-
-        // 3. 访问 else 语句 (如果存在)
         if (node.getElseStmt() != null) {
             visitStmt(node.getElseStmt());
         }
     }
 
+    // | 'break' ';' | 'continue' ';' // m
     public void visitBreakStmt(BreakStmtNode node) {
         if (hub.getLoopDepth() == 0) {
-            // 错误 m: 在非循环块中使用 break
             ErrorReporter.addError(node.getLineNumber(), 'm');
         }
     }
 
+    // | 'break' ';' | 'continue' ';' // m
     public void visitContinueStmt(ContinueStmtNode node) {
         if (hub.getLoopDepth() == 0) {
-            // 错误 m: 在非循环块中使用 continue
             ErrorReporter.addError(node.getLineNumber(), 'm');
         }
     }
 
+    // | 'return' [Exp] ';' // f
     public void visitReturnStmt(ReturnStmtNode node) {
         FuncSymbol func = hub.getCurrentFunction();
         if (func == null) {
@@ -162,45 +165,32 @@ public class StatementVisitor {
         boolean hasExp = (node.getExp() != null);
         boolean expectsExp = (func.getReturnType() == SymbolType.IntFunc);
 
-        // 错误 f: 无返回值的函数存在不匹配的 return 语句
+        // void函数return了exp
         if (hasExp && !expectsExp) {
-            // void func() { return 1; }
             ErrorReporter.addError(node.getLineNumber(), 'f');
         }
-        // else if (!hasExp && expectsExp) {
-        //     // int func() { return; }
-        //     // *** 删除这个 else if 块 ***
-        //     // 根据规范, int 函数不报 f 错误, 仅在末尾检查 g 错误。
-        // }
-
-        // 访问 return 后的表达式 (如果有)
         if (hasExp) {
             SymbolType returnType = hub.getExprVisitor().visitExp(node.getExp());
             // (未来任务：检查 returnType 是否为 Int)
         }
     }
 
+    // | 'printf''('StringConst {','Exp}')'';' // l
     public void visitPrintfStmt(PrintfStmtNode node) {
-        // 1. 检查错误 'l' (printf中格式字符与表达式个数不匹配)
-        // 注意：.getValue() 返回的是 *不带* 双引号的字符串值
         String formatString = (String) node.getFormatString().getValue();
         int expectedCount = 0;
 
-        // 简单地计算 %d 的数量
-        // (注意：这没有处理 %%d, %%, %d%d 等边缘情况，但对于 SysY 足够了)
+        // 注意：这没有处理 %%d, %%, %d%d 等边缘情况
         int index = formatString.indexOf("%d");
         while (index != -1) {
             expectedCount++;
             index = formatString.indexOf("%d", index + 2);
         }
-
         int actualCount = node.getExps().size();
-
         if (expectedCount != actualCount) {
             ErrorReporter.addError(node.getLineNumber(), 'l');
         }
 
-        // 2. 递归访问所有参数表达式，检查其中的错误 (如 'c', 'd')
         for (ExpNode exp : node.getExps()) {
             SymbolType paramType = hub.getExprVisitor().visitExp(exp);
             // (未来任务：检查 paramType 是否为 Int)

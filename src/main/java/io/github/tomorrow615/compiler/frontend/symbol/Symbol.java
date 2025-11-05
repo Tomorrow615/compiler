@@ -2,9 +2,7 @@ package io.github.tomorrow615.compiler.frontend.symbol;
 
 public abstract class Symbol {
     protected final String name;
-
     protected final SymbolType type;
-
     protected final int line;
 
     public Symbol(String name, SymbolType type, int line) {
