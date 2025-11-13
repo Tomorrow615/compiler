@@ -7,6 +7,7 @@ import io.github.tomorrow615.compiler.frontend.parser.Parser;
 import io.github.tomorrow615.compiler.frontend.error.Error;
 import io.github.tomorrow615.compiler.util.*;
 import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
+import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
 import io.github.tomorrow615.compiler.midend.*;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 
@@ -47,6 +48,8 @@ public class Compiler {
             // --- 步骤 3: 语义分析 ---
             SemanticVisitor semanticVisitor = new SemanticVisitor();
             semanticVisitor.visit(compUnit);
+            List<SymbolTable> allScopes = semanticVisitor.getAllScopes();
+
             try (SymbolRecorder symbolRecorder = new SymbolRecorder(outputFileSymbol)) {
                 symbolRecorder.recordAll(semanticVisitor.getAllScopes());
             }
@@ -61,7 +64,7 @@ public class Compiler {
                 }
             } else {
                 // --- 步骤 5: IR 生成 ---
-                IRGeneratorVisitor irVisitor = new IRGeneratorVisitor(compUnit);
+                IRGeneratorVisitor irVisitor = new IRGeneratorVisitor(compUnit, allScopes);
                 Module llvmModule = irVisitor.generate(); // 开始遍历并生成 IR
 
                 // --- [步骤 6: 打印 LLVM IR ---

@@ -5,6 +5,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
 import io.github.tomorrow615.compiler.util.*;
+import io.github.tomorrow615.compiler.midend.llvm.type.*;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -13,28 +14,35 @@ public class GetElementPtrInst extends Instruction {
 
     private final Type baseType; // GEP 的第一个 <ty> 参数，即指针指向的元素的类型
 
-    /**
-     * 构造 'getelementptr' 指令
-     * @param basePtr 基指针 (e.g., [10 x i32]* %a)
-     * @param indices 索引列表 (e.g., i32 0, i32 %i)
-     * @param name 结果指针的名字 (e.g., %gep.tmp)
-     * @param parentBlock 插入到的基本块
-     */
     public GetElementPtrInst(Value basePtr, List<Value> indices, String name, BasicBlock parentBlock) {
-        // GEP 的结果总是一个指针
-        // (这是一个简化，精确的返回类型推导比较复杂，但对于一维数组，
-        // 返回指向元素类型的指针是正确的)
-        super(new PointerType(((PointerType) basePtr.getType()).getTargetType()), name, parentBlock);
 
-        // 第一个 <ty> 参数
+        // --- [ 修复: 'super()' 必须是第一行 ] ---
+        // 1. 我们首先调用一个 static 辅助方法来计算返回类型
+        super(calculateReturnType(basePtr, indices), name, parentBlock);
+
+        // 2. 在 super() 调用*之后*，我们现在可以安全地设置 'this' 字段
         this.baseType = ((PointerType) basePtr.getType()).getTargetType();
+        // --- [ 修复结束 ] ---
 
-        // 操作数0: 基指针
+        // 3. 添加操作数 (不变)
         this.addOperand(basePtr);
-
-        // 操作数 1...n: 索引
         for (Value index : indices) {
             this.addOperand(index);
+        }
+    }
+
+    private static Type calculateReturnType(Value basePtr, List<Value> indices) {
+        // 1. 获取基指针指向的类型 (e.g., [9 x i8])
+        Type baseType = ((PointerType) basePtr.getType()).getTargetType();
+
+        // 2. 计算 GEP 的返回类型
+        if (baseType instanceof ArrayType && indices.size() > 1) {
+            // 如果是对数组用 GEP (e.g., gep [9 x i8], ..., i32 0, i32 0)
+            // 结果是指向数组*元素*的指针 (e.g., i8*)
+            return new PointerType(((ArrayType) baseType).getElementType());
+        } else {
+            // 默认回退 (e.g., GEP i32, i32* %p, i32 1)
+            return new PointerType(baseType);
         }
     }
 

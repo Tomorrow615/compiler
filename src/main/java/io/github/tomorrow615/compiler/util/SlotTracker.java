@@ -45,35 +45,34 @@ public class SlotTracker {
      * 预遍历单个函数，为所有局部 Value (Argument, BasicBlock, Instruction) 命名
      */
     private void traceFunction(Function func) {
-        if (func.isDeclaration()) {
-            return; // 声明 (declare) 没有 BB 和指令
-        }
 
-        int counter = 0;
-
+        // --- [ 修复开始 ] ---
         // 1. 为参数命名 (e.g., %0, %1)
+        //    (我们必须在 `isDeclaration` 检查*之前*执行此操作)
+        int counter = 0;
         for (Argument arg : func.getArguments()) {
             String name = "%" + counter++;
             arg.setName(name); // <-- 我们直接更新 Argument 对象的名字
             nameMap.put(arg, name);
         }
 
-        // 2. 为基本块和指令命名
-        for (BasicBlock bb : func.getBasicBlocks()) {
-            // BasicBlock 的 name 在构造时已设置 (e.g., "entry")
-            // 我们在打印时添加 ":"，所以这里不需要 "%"
-            nameMap.put(bb, bb.getName());
+        if (func.isDeclaration()) {
+            return; // 声明 (declare) 没有 BB 和指令
+        }
+        // --- [ 修复结束 ] ---
 
+        // 2. 为基本块和指令命名 (这段逻辑不变，只是 counter 初始化移上去了)
+        for (BasicBlock bb : func.getBasicBlocks()) {
+            nameMap.put(bb, bb.getName());
             for (Instruction inst : bb.getInstructions()) {
-                // 只有返回非 void 类型的指令才需要一个名字
                 if (!inst.getType().isVoidType()) {
                     String name = "%" + counter++;
-                    inst.setName(name); // <-- 我们直接更新 Instruction 对象的名字
+                    inst.setName(name);
                     nameMap.put(inst, name);
                 }
             }
         }
-        funcValueCounters.put(func, counter); // 存下这个函数用了多少个局部变量
+        funcValueCounters.put(func, counter);
     }
 
     /**
