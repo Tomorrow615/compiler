@@ -58,29 +58,55 @@ public class ExpressionIRVisitor {
         return visit(node.getLorExp());
     }
 
-
     public Value getPointerToLVal(LValNode node) {
-        // 1. 查找符号
-        // [修改] 通过 hub 获取 currentScope
+        // 1. 查找符号 (来自 Pass 1)
         Symbol symbol = hub.getCurrentScope().lookup(node.getIdent().getText());
         if (symbol == null) {
             return null;
         }
-
-        // [ 错误修复 ]
         if (!(symbol instanceof ValueSymbol valueSymbol)) {
             return null;
         }
-        Value basePtr = valueSymbol.getLlvmValue();
-        // [ 修复结束 ]
 
-        if (node.getType() == LValNode.Type.SCALAR) {
-            return basePtr;
+        // 2. 获取 basePtr。
+        //    - 局部/全局变量: basePtr 是 [N x i32]*
+        //    - 数组参数:     basePtr 是 i32** (指向 i32* 的指针)
+        Value basePtr = valueSymbol.getLlvmValue();
+
+        if (node.getType() == LValNode.Type.SCALAR) { //
+            // 访问 'a' (标量)
+            return basePtr; // 返回 i32*
         } else {
-            // TODO: (阶段 5) 数组 GEP 逻辑
-            return basePtr;
+            // 访问 'a[i]' (数组元素)
+            // 1. 获取索引值 (i32)
+            Value index = visit(node.getArrayExps().get(0)); // 递归 visit(ExpNode)
+
+            // 2. 检查 basePtr 的类型 (i32** 还是 [N x i32]*)
+            Type basePtrType = basePtr.getType();
+            if (basePtrType instanceof PointerType) { // [cite: 2207-2211]
+                Type targetType = ((PointerType) basePtrType).getTargetType(); // [cite: 2209]
+
+                if (targetType.isArrayType()) { // [cite: 2188-2193]
+                    // 情况 A: basePtr 是 [N x i32]* (局部/全局数组)
+                    // 我们需要 GEP (ptr, 0, index)
+                    Value zero = new ConstantInt(0);
+                    // [cite: 1911]
+                    return builder.createGep(basePtr, List.of(zero, index), "arr.idx");
+                } else if (targetType.isPointerType()) { // [cite: 2207-2211]
+                    // 情况 B: basePtr 是 i32** (数组参数 alloca 后的地址)
+                    // 1. 先 load 拿到 i32* (即函数参数 %0)
+                    // [cite: 1909]
+                    Value loadedPtr = builder.createLoad(basePtr, "arr.param.ptr");
+                    // 2. GEP (loadedPtr, index) -> i32*
+                    // [cite: 1911]
+                    return builder.createGep(loadedPtr, List.of(index), "arr.param.idx");
+                }
+            }
+            // 理论上不应到达这里
+            return null;
         }
     }
+
 
     /**
      * (辅助方法) 访问 LVal 以获取其 *值*
@@ -125,20 +151,67 @@ public class ExpressionIRVisitor {
                 // 1. 查找函数符号
                 Token ident = node.getIdent();
                 Symbol symbol = hub.getCurrentScope().lookup(ident.getText());
-
-                // (健壮性检查，SemanticVisitor 应该已处理)
                 if (!(symbol instanceof FuncSymbol funcSymbol)) {
                     return null;
                 }
 
-                // 2. 获取 Function 对象 (来自全局声明或 4.4 的 visitFuncDef)
+                // 2. 获取 Function 对象
                 Function callee = (Function) funcSymbol.getLlvmValue();
 
                 // 3. 准备参数
                 List<Value> args = new ArrayList<>();
+                // [修改] 获取期望的形参列表
+                List<ValueSymbol> expectedParams = funcSymbol.getParameters(); // [cite: 1602]
+
                 if (node.getFuncRParams() != null) {
-                    for (ExpNode argExp : node.getFuncRParams().getParams()) {
-                        args.add(visit(argExp)); // 递归调用 visit(ExpNode)
+                    List<ExpNode> actualParams = node.getFuncRParams().getParams();
+
+                    for (int i = 0; i < actualParams.size(); i++) {
+                        ExpNode argExp = actualParams.get(i);
+                        // [修改] 获取对应的形参
+                        ValueSymbol expectedParam = expectedParams.get(i);
+
+                        if (expectedParam.getDimension() > 0) {
+                            // 期望一个数组 (i32*)
+
+                            // 1. 找到 LVal 节点
+                            LValNode lvalNode = null;
+                            try {
+                                // 尝试解析 Exp -> ... -> LVal [cite: 1185-1187, 1171-1174, 1205-1208, 1228-1242, 1212-1223, 1199-1204]
+                                lvalNode = ((PrimaryExpNode) ((UnaryExpNode) ((MulExpNode) argExp.getAddExp().getMulExps().get(0)).getUnaryExps().get(0)).getPrimaryExp()).getLval();
+                            } catch (Exception e) { /* 忽略转换失败 */ }
+
+                            if (lvalNode != null && lvalNode.getType() == LValNode.Type.SCALAR) {
+                                // 传递的是 'a'，而不是 'a[i]'
+
+                                // 2. 获取 [N x i32]* (或 i32**)
+                                Value basePtr = getPointerToLVal(lvalNode); //
+
+                                Type basePtrType = basePtr.getType();
+                                if (basePtrType instanceof PointerType) {
+                                    Type targetType = ((PointerType) basePtrType).getTargetType();
+                                    if (targetType.isArrayType()) {
+                                        // 3a. "衰变" (decay) [N x i32]* 为 i32*
+                                        Value zero = new ConstantInt(0);
+                                        Value decayedPtr = builder.createGep(basePtr, List.of(zero, zero), "arr.decay");
+                                        args.add(decayedPtr);
+                                    } else if (targetType.isPointerType()) {
+                                        // 3b. basePtr 是 i32** (数组参数)，load 它得到 i32*
+                                        Value loadedPtr = builder.createLoad(basePtr, "arr.param.decay");
+                                        args.add(loadedPtr);
+                                    }
+                                }
+                            } else {
+                                // 传递的是 a[i] (i32) 或其他表达式 (i32)
+                                // 但期望 i32*
+                                // SemanticVisitor 应该已经报错 (e) [cite: 1692-1693]
+                                args.add(visit(argExp)); // 仍然添加 i32，让 LLVM 报错
+                            }
+
+                        } else {
+                            // 期望标量 (i32)
+                            args.add(visit(argExp)); // 保持原逻辑
+                        }
                     }
                 }
 

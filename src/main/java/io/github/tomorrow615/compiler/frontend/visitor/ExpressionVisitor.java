@@ -224,4 +224,85 @@ public class ExpressionVisitor {
         }
         return expected.equals(actual);
     }
+
+    public int evalConstExp(ConstExpNode node) {
+        if (node == null) return 0; // 或抛出异常
+        return evalAddExp(node.getAddExp());
+    }
+
+    private int evalAddExp(AddExpNode node) {
+        int lhsVal = evalMulExp(node.getMulExps().get(0));
+
+        for (int i = 0; i < node.getOperators().size(); i++) {
+            int rhsVal = evalMulExp(node.getMulExps().get(i + 1));
+            Token op = node.getOperators().get(i);
+
+            if (op.getType() == TokenType.PLUS) {
+                lhsVal = lhsVal + rhsVal;
+            } else if (op.getType() == TokenType.MINU) {
+                lhsVal = lhsVal - rhsVal;
+            }
+        }
+        return lhsVal;
+    }
+
+    private int evalMulExp(MulExpNode node) {
+        int lhsVal = evalUnaryExp(node.getUnaryExps().get(0));
+
+        for (int i = 0; i < node.getOperators().size(); i++) {
+            int rhsVal = evalUnaryExp(node.getUnaryExps().get(i + 1));
+            Token op = node.getOperators().get(i);
+
+            if (op.getType() == TokenType.MULT) {
+                lhsVal = lhsVal * rhsVal;
+            } else if (op.getType() == TokenType.DIV) {
+                lhsVal = lhsVal / rhsVal; // 假设 SysY 行为同 Java int 除法
+            } else if (op.getType() == TokenType.MOD) {
+                lhsVal = lhsVal % rhsVal;
+            }
+        }
+        return lhsVal;
+    }
+
+    private int evalUnaryExp(UnaryExpNode node) {
+        switch (node.getType()) {
+            case PRIMARY:
+                return evalPrimaryExp(node.getPrimaryExp());
+            case UNARY_OP:
+                int val = evalUnaryExp(node.getUnaryExp());
+                if (node.getUnaryOp().getOp().getType() == TokenType.MINU) {
+                    return -val;
+                } else {
+                    return val; // '+' or '!' (在 ConstExp 中 ! 是非法的)
+                }
+            case FUNC_CALL:
+            default:
+                // SysY 规定 ConstExp 不能包含函数调用 [cite: 1495-1497]
+                // SemanticVisitor 应该已报错，但我们这里返回 0 以防万一
+                return 0;
+        }
+    }
+
+    private int evalPrimaryExp(PrimaryExpNode node) {
+        switch (node.getType()) {
+            case NUMBER:
+                // 直接解析字面量
+                String numStr = node.getNumber().getIntConst().getText();
+                return Integer.parseInt(numStr);
+            case PAREN_EXP:
+                // 递归
+                return evalAddExp(node.getExp().getAddExp());
+            case LVAL:
+                // [关键] 查找已定义的常量
+                Symbol symbol = hub.getCurrentScope().lookup(node.getLval().getIdent().getText());
+                if (symbol instanceof ValueSymbol vs && vs.isConst() && vs.getConstValue() != null) {
+                    // TODO: 仅支持标量 const int N = 10;
+                    // 不支持 const int a[10]; ... arr[a[0]] (这在 SysY 中是非法的)
+                    return vs.getConstValue();
+                }
+                // 访问了非常量 (如变量) 或未定义符号
+                return 0; // SemanticVisitor 应该已报错
+        }
+        return 0;
+    }
 }

@@ -22,16 +22,19 @@ public class GlobalVariable extends GlobalValue {
     public String toString(SlotTracker tracker) {
         // 全局变量不依赖 tracker, 但为统一接口
         StringBuilder sb = new StringBuilder();
-        sb.append(this.getName()).append(" = dso_local global "); // [cite: 1518-1525] (已更新 dso_local)
+        sb.append(this.getName()).append(" = dso_local global ");
 
         Type targetType = ((PointerType) this.type).getTargetType();
         sb.append(targetType.toString());
 
         if (initializer != null) {
-            // 假设常量也不需要 tracker
             sb.append(" ").append(initializer.toString(tracker));
         } else {
-            sb.append(" 0");
+            if (targetType.isArrayType()) {
+                sb.append(" zeroinitializer");
+            } else {
+                sb.append(" 0"); // 标量默认为 0
+            }
         }
         return sb.toString();
     }

@@ -110,6 +110,31 @@ public class SemanticVisitor {
                 SymbolType.ConstIntArray : SymbolType.ConstInt;
         ValueSymbol symbol = new ValueSymbol(ident.getText(), type, ident.getLineNumber(), dimension);
 
+        if (type == SymbolType.ConstInt) {
+            // (保持上一步的逻辑)
+            try {
+                int value = exprVisitor.evalConstExp(node.getConstInitVal().getSingleInit());
+                symbol.setConstValue(value);
+            } catch (Exception e) {
+                // ...
+            }
+        } else if (type == SymbolType.ConstIntArray) { //
+            // --- [ START 5.2-ArraySize: Store Array Size ] ---
+            try {
+                // 1. 获取大小表达式 [cite: 1447-1451]
+                ConstExpNode sizeExp = node.getConstExps().get(0);
+                // 2. 调用 Pass 1 求值器
+                int size = exprVisitor.evalConstExp(sizeExp);
+                // 3. 存入新字段
+                symbol.setArraySize(size);
+            } catch (Exception e) {
+                // ... (求值失败)
+            }
+            // TODO: (Phase 5.C) 处理数组的常量初始化
+            // const int a[3] = {1, 2, 3};
+            // --- [ END 5.2-ArraySize: Store Array Size ] ---
+        }
+
         boolean success = currentScope.addSymbol(symbol);
         if (!success) {
             ErrorReporter.addError(ident.getLineNumber(), 'b');
@@ -135,6 +160,19 @@ public class SemanticVisitor {
             type = (dimension > 0) ? SymbolType.IntArray : SymbolType.Int;
         }
         ValueSymbol symbol = new ValueSymbol(ident.getText(), type, ident.getLineNumber(), dimension);
+
+        if (type == SymbolType.IntArray || type == SymbolType.StaticIntArray) {
+            try {
+                // 1. 获取大小表达式 [cite: 1447-1451]
+                ConstExpNode sizeExp = node.getConstExps().get(0);
+                // 2. 调用 Pass 1 求值器
+                int size = exprVisitor.evalConstExp(sizeExp);
+                // 3. 存入新字段
+                symbol.setArraySize(size);
+            } catch (Exception e) {
+                // ... (求值失败)
+            }
+        }
 
         boolean success = currentScope.addSymbol(symbol);
         if (!success) {

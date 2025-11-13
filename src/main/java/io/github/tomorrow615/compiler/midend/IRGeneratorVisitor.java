@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Stack;
 
 public class IRGeneratorVisitor {
 
@@ -30,6 +31,9 @@ public class IRGeneratorVisitor {
     private final Map<String, Function> ioFunctions = new HashMap<>();
     private Function currentFunction;
     private final Map<String, GlobalVariable> stringConstants = new HashMap<>();
+    private final Stack<BasicBlock> loopMergeStack = new Stack<>();
+    private final Stack<BasicBlock> loopUpdateStack = new Stack<>();
+    private int labelCount = 0;
 
     private final ExpressionIRVisitor exprVisitor;
     private final StatementIRVisitor stmtVisitor;
@@ -66,26 +70,44 @@ public class IRGeneratorVisitor {
         if (stringConstants.containsKey(text)) {
             return stringConstants.get(text);
         }
-
-        // --- [修改开始] ---
-        // 1. 创建类型 (e.g., [7 x i8] for "Hello\n")
-        //    (text.getBytes().length + 1) 是为了 \0 终止符
         int numChars = text.getBytes().length + 1;
         ArrayType stringType = new ArrayType(numChars, IntegerType.i8);
-
-        // 2. 创建一个 ConstantString (用于初始化 GlobalVariable)
-        //    (不再使用匿名内部类)
         Constant initializer = new ConstantString(stringType, text);
-        // --- [修改结束] ---
-
-        // 3. 创建 GlobalVariable
         String gvName = "@.str." + stringConstants.size();
         GlobalVariable gv = new GlobalVariable(stringType, gvName, initializer);
-
-        // 4. 添加到 Module 和缓存
         this.module.addGlobalVariable(gv);
         this.stringConstants.put(text, gv);
         return gv;
+    }
+
+    public void pushLoop(BasicBlock mergeBB, BasicBlock updateBB) {
+        this.loopMergeStack.push(mergeBB);
+        this.loopUpdateStack.push(updateBB);
+    }
+
+    public void popLoop() {
+        this.loopMergeStack.pop();
+        this.loopUpdateStack.pop();
+    }
+
+    public BasicBlock getCurrentLoopMergeBB() {
+        return this.loopMergeStack.peek();
+    }
+
+    public BasicBlock getCurrentLoopUpdateBB() {
+        return this.loopUpdateStack.peek();
+    }
+
+    public String getNextIfThenLabel() {
+        return "if.then." + (labelCount++);
+    }
+
+    public String getNextIfElseLabel() {
+        return "if.else." + (labelCount++);
+    }
+
+    public String getNextIfMergeLabel() {
+        return "if.merge." + (labelCount++);
     }
 
     public Module generate() {
@@ -157,22 +179,45 @@ public class IRGeneratorVisitor {
         for (ConstDefNode def : node.getConstDefs()) {
             // 1. 查找符号 (在全局 scope)
             ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
+            Type type;
+            Constant initializer; // [修改]
 
-            // 2. 确定类型 (暂不支持全局数组)
-            Type type = IntegerType.i32;
             if (symbol.getDimension() > 0) {
-                // TODO: 实现全局数组 (阶段 5)
-                type = IntegerType.i32; // 占位
+                // [修改] 是数组
+                // 2.A. 获取大小 (来自 2.A-修订版)
+                int size = symbol.getArraySize();
+                // 2.B. 创建数组类型
+                type = new ArrayType(size, IntegerType.i32);
+
+                // 2.C. 处理全局常量数组初始化
+                if (def.getConstInitVal() != null && def.getConstInitVal().getType() == ConstInitValNode.Type.ARRAY) {
+                    List<Constant> initValues = new ArrayList<>();
+                    List<ConstExpNode> constExps = def.getConstInitVal().getArrayInit();
+                    for (ConstExpNode constExp : constExps) {
+                        // [使用 2.A-修订版] 调用 evalConstExp
+                        initValues.add(evalConstExp(constExp));
+                    }
+                    // SysY 规定未赋值的用 0 填充
+                    for (int i = constExps.size(); i < size; i++) {
+                        initValues.add(new ConstantInt(0));
+                    }
+                    // [使用 2.B] 创建 ConstantArray
+                    initializer = new ConstantArray(type, initValues);
+                } else {
+                    // 如果 const 数组没有 {..} 初始化 (SysY 语法不允许, 但我们做个保护)
+                    initializer = new ConstantArray(type, new ArrayList<>()); // 将打印为 zeroinitializer
+                }
+            } else {
+                // [修改] 是标量 (逻辑不变)
+                type = IntegerType.i32;
+                initializer = evalConstInit(def.getConstInitVal());
             }
 
-            // 3. 计算初始值 (必须是常量)
-            Constant initializer = evalConstInit(def.getConstInitVal());
-
-            // 4. 创建 GlobalVariable
+            // 3. 创建 GlobalVariable
             GlobalVariable gv = new GlobalVariable(type, "@" + symbol.getName(), initializer);
             this.module.addGlobalVariable(gv);
 
-            // 5. 执行桥接
+            // 4. 执行桥接
             symbol.setLlvmValue(gv);
         }
     }
@@ -181,28 +226,51 @@ public class IRGeneratorVisitor {
         for (VarDefNode def : node.getVarDefs()) {
             // 1. 查找符号
             ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
+            Type type;
+            Constant initializer = null; // [修改]
 
-            // 2. 确定类型 (暂不支持全局数组)
-            Type type = IntegerType.i32;
             if (symbol.getDimension() > 0) {
-                // TODO: 实现全局数组 (阶段 5)
-                type = IntegerType.i32; // 占位
-            }
+                // [修改] 是数组
+                // 2.A. 获取大小
+                int size = symbol.getArraySize();
+                // 2.B. 创建数组类型
+                type = new ArrayType(size, IntegerType.i32);
 
-            // 3. 计算初始值 (全局变量必须是常量或 0) [cite: 453, 457]
-            Constant initializer = null;
-            if (def.getType() == VarDefNode.Type.INITIALIZED) {
-                initializer = evalInit(def.getInitVal());
+                // 2.C. 处理全局变量数组初始化
+                if (def.getType() == VarDefNode.Type.INITIALIZED && def.getInitVal().getType() == InitValNode.Type.ARRAY) {
+                    List<Constant> initValues = new ArrayList<>();
+                    // 全局变量的 InitVal -> Exp 必须是 ConstExp
+                    List<ExpNode> exps = def.getInitVal().getArrayInit();
+                    for (ExpNode exp : exps) {
+                        // [使用 2.A-修订版]
+                        initValues.add(evalConstExp(new ConstExpNode(exp.getAddExp())));
+                    }
+                    // 用 0 填充剩余部分
+                    for (int i = exps.size(); i < size; i++) {
+                        initValues.add(new ConstantInt(0));
+                    }
+                    // [使用 2.B]
+                    initializer = new ConstantArray(type, initValues);
+                } else {
+                    // 未初始化的全局数组
+                    initializer = null; // 将在 GlobalVariable.toString() [cite: 2280-2288] 中变为 zeroinitializer
+                }
             } else {
-                // 未初始化的全局变量默认为 0 [cite: 457]
-                initializer = new ConstantInt(0);
+                // [修改] 是标量
+                type = IntegerType.i32;
+                if (def.getType() == VarDefNode.Type.INITIALIZED) {
+                    initializer = evalInit(def.getInitVal());
+                } else {
+                    // 未初始化的全局变量默认为 0
+                    initializer = new ConstantInt(0);
+                }
             }
 
-            // 4. 创建 GlobalVariable
+            // 3. 创建 GlobalVariable
             GlobalVariable gv = new GlobalVariable(type, "@" + symbol.getName(), initializer);
             this.module.addGlobalVariable(gv);
 
-            // 5. 执行桥接
+            // 4. 执行桥接
             symbol.setLlvmValue(gv);
         }
     }
@@ -264,9 +332,16 @@ public class IRGeneratorVisitor {
     public void visit(FuncDefNode node) {
         FuncSymbol funcSymbol = (FuncSymbol) this.currentScope.lookup(node.getIdent().getText());
         Type retType = (funcSymbol.getReturnType() == SymbolType.IntFunc) ? IntegerType.i32 : VoidType.get();
+
         List<Type> paramTypes = new ArrayList<>();
         for (ValueSymbol paramSym : funcSymbol.getParameters()) {
-            paramTypes.add(IntegerType.i32); // 简化
+            if (paramSym.getDimension() > 0) {
+                // 数组参数被视为指针 i32*
+                paramTypes.add(new PointerType(IntegerType.i32));
+            } else {
+                // 标量参数 i32
+                paramTypes.add(IntegerType.i32);
+            }
         }
         FunctionType funcType = new FunctionType(retType, paramTypes);
         Function function = new Function(funcType, "@" + funcSymbol.getName());
@@ -280,7 +355,6 @@ public class IRGeneratorVisitor {
 
         visit(node.getBlock());
 
-        // --- [ 修复开始 ] ---
         // 9. [修改] 仅在当前块*未*终结时添加默认 ret
         boolean hasTerminator = false;
         if (!builder.getCurrentBlock().getInstructions().isEmpty()) {
@@ -298,7 +372,6 @@ public class IRGeneratorVisitor {
                 builder.createRet(new ConstantInt(0));
             }
         }
-        // --- [ 修复结束 ] ---
 
         exitScope();
         this.currentFunction = null;
@@ -342,14 +415,17 @@ public class IRGeneratorVisitor {
 
         for (int i = 0; i < paramSymbols.size(); i++) {
             ValueSymbol paramSym = paramSymbols.get(i);
-            Argument arg = arguments.get(i); // LLVM 的 %0, %1...
+            Argument arg = arguments.get(i); // LLVM 的 %0 (i32) 或 %1 (i32*)
 
-            // 1. 为参数在栈上分配空间
-            // (暂不处理数组)
-            Type paramType = IntegerType.i32;
+            // 1. [修改] 为参数在栈上分配空间
+            // arg.getType() 现在可能是 i32 (标量) 或 i32* (数组指针)
+            Type paramType = arg.getType();
+            // ptr 的类型是 i32* (标量) 或 i32** (数组指针)
             Value ptr = builder.createAlloca(paramType, paramSym.getName() + ".addr");
 
-            // 2. 将参数值 (%0) 存入栈空间
+            // 2. 将参数值 (%0 或 %1) 存入栈空间
+            // store i32 %0, i32* %ptr (标量)
+            // store i32* %1, i32** %ptr (数组)
             builder.createStore(arg, ptr);
 
             // 3. [关键] 桥接：让符号表中的 "a" 指向 "%a.addr"
@@ -391,35 +467,111 @@ public class IRGeneratorVisitor {
         }
     }
 
+    // 位于 midend/IRGeneratorVisitor.java
+
     private void visitLocalConstDecl(ConstDeclNode node) {
         for (ConstDefNode def : node.getConstDefs()) {
             ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
-            Type type = IntegerType.i32; // 简化
+            Type type;
+            if (symbol.getDimension() > 0) {
+                int size = symbol.getArraySize();
+                type = new ArrayType(size, IntegerType.i32);
+            } else {
+                type = IntegerType.i32;
+            }
             Value ptr = builder.createAlloca(type, symbol.getName() + ".addr");
             symbol.setLlvmValue(ptr);
 
-            // [修改] 委托给 exprVisitor
-            Value initVal = exprVisitor.visit(def.getConstInitVal());
+            // --- [ START 5.2-Array: Local Const Array Init ] ---
+            if (symbol.getDimension() > 0) {
+                // 是数组， const 必须有 { ... } 初始化
+                ConstInitValNode initValNode = def.getConstInitVal();
+                if (initValNode.getType() == ConstInitValNode.Type.ARRAY) { //
+                    List<ConstExpNode> initExps = initValNode.getArrayInit();
 
-            if (initVal != null) {
-                builder.createStore(initVal, ptr);
+                    for (int i = 0; i < initExps.size(); i++) {
+                        // 1. 获取初始值 (e.g., visit(1), visit(2), ...)
+                        Value val_i = exprVisitor.visit(initExps.get(i));
+
+                        // 2. 获取 &b[i] 的指针
+                        Value zero = new ConstantInt(0);
+                        Value i_const = new ConstantInt(i);
+                        Value elemPtr = builder.createGep(ptr, List.of(zero, i_const), "init.idx");
+
+                        // 3. store
+                        builder.createStore(val_i, elemPtr);
+                    }
+
+                    // [SysY 规定: const 数组未赋值的置 0] [cite: 2140]
+                    int size = symbol.getArraySize();
+                    if (initExps.size() < size) {
+                        Value zeroVal = new ConstantInt(0);
+                        Value zeroIdx = new ConstantInt(0);
+                        for (int i = initExps.size(); i < size; i++) {
+                            Value i_const = new ConstantInt(i);
+                            Value elemPtr = builder.createGep(ptr, List.of(zeroIdx, i_const), "init.zero.idx");
+                            builder.createStore(zeroVal, elemPtr);
+                        }
+                    }
+                }
+            } else {
+                // 是标量 (保持原逻辑)
+                Value initVal = exprVisitor.visit(def.getConstInitVal());
+                if (initVal != null) {
+                    builder.createStore(initVal, ptr);
+                }
             }
+            // --- [ END 5.2-Array: Local Const Array Init ] ---
         }
     }
+
+    // 位于 midend/IRGeneratorVisitor.java
 
     private void visitLocalVarDecl(VarDeclNode node) {
         for (VarDefNode def : node.getVarDefs()) {
             ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
-            Type type = IntegerType.i32; // 简化
+            Type type;
+            if (symbol.getDimension() > 0) {
+                int size = symbol.getArraySize();
+                type = new ArrayType(size, IntegerType.i32);
+            } else {
+                type = IntegerType.i32;
+            }
             Value ptr = builder.createAlloca(type, symbol.getName() + ".addr");
             symbol.setLlvmValue(ptr);
 
             if (def.getType() == VarDefNode.Type.INITIALIZED) {
-                // [修改] 委托给 exprVisitor
-                Value initVal = exprVisitor.visit(def.getInitVal());
-                if (initVal != null) {
-                    builder.createStore(initVal, ptr);
+
+                // --- [ START 5.2-Array: Local Array Init ] ---
+                if (symbol.getDimension() > 0) {
+                    // 是数组，且有 { ... } 初始化
+                    InitValNode initValNode = def.getInitVal();
+                    if (initValNode.getType() == InitValNode.Type.ARRAY) { // [cite: 1789-1793]
+                        List<ExpNode> initExps = initValNode.getArrayInit();
+
+                        for (int i = 0; i < initExps.size(); i++) {
+                            // 1. 获取初始值 (e.g., visit(1), visit(2), ...)
+                            Value val_i = exprVisitor.visit(initExps.get(i));
+
+                            // 2. 获取 &b[i] 的指针
+                            Value zero = new ConstantInt(0);
+                            Value i_const = new ConstantInt(i);
+                            Value elemPtr = builder.createGep(ptr, List.of(zero, i_const), "init.idx");
+
+                            // 3. store
+                            builder.createStore(val_i, elemPtr);
+                        }
+                        // TODO: SysY 规定局部数组未初始化的部分 *不* 需要自动置 0 [cite: 2143]
+                        // (与全局 [cite: 2140] 和 const [cite: 2140] 不同)
+                    }
+                } else {
+                    // 是标量 (保持原逻辑)
+                    Value initVal = exprVisitor.visit(def.getInitVal());
+                    if (initVal != null) {
+                        builder.createStore(initVal, ptr);
+                    }
                 }
+                // --- [ END 5.2-Array: Local Array Init ] ---
             }
         }
     }
