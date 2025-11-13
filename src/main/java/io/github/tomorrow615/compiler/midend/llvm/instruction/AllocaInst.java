@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
+import io.github.tomorrow615.compiler.util.*;
 
 public class AllocaInst extends Instruction {
 
@@ -25,9 +26,12 @@ public class AllocaInst extends Instruction {
     }
 
     @Override
+    public String toString(SlotTracker tracker) {
+        return tracker.getName(this) + " = alloca " + this.allocatedType.toString();
+    }
+
+    @Override
     public String toString() {
-        // e.g., %a = alloca i32
-        // e.g., %arr = alloca [10 x i32]
-        return this.getName() + " = alloca " + this.allocatedType.toString();
+        return "AllocaInst<" + this.name + ">@" + hashCode();
     }
 }

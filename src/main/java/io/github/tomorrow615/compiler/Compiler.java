@@ -7,6 +7,8 @@ import io.github.tomorrow615.compiler.frontend.parser.Parser;
 import io.github.tomorrow615.compiler.frontend.error.Error;
 import io.github.tomorrow615.compiler.util.*;
 import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
+import io.github.tomorrow615.compiler.midend.*;
+import io.github.tomorrow615.compiler.midend.llvm.Module;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -21,6 +23,7 @@ public class Compiler {
         String outputFileLexer = "lexer.txt";
         String outputFileParser = "parser.txt";
         String outputFileSymbol = "symbol.txt";
+        String outputFileLlvmIr = "llvm_ir.txt";
         String outputFileError = "error.txt";
 
         try {
@@ -55,6 +58,15 @@ public class Compiler {
                         errorWriter.write(error.formatForOutput());
                         errorWriter.newLine();
                     }
+                }
+            } else {
+                // --- 步骤 5: IR 生成 ---
+                IRGeneratorVisitor irVisitor = new IRGeneratorVisitor(compUnit);
+                Module llvmModule = irVisitor.generate(); // 开始遍历并生成 IR
+
+                // --- [步骤 6: 打印 LLVM IR ---
+                try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
+                    irPrinter.print(llvmModule);
                 }
             }
         } catch (IOException e) {

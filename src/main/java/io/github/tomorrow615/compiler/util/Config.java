@@ -6,5 +6,7 @@ public class Config {
     // 语法分析
     public static final boolean ENABLE_PARSER_OUTPUT = false;
     // 语义分析
-    public static final boolean ENABLE_SYMBOL_OUTPUT = true;
+    public static final boolean ENABLE_SYMBOL_OUTPUT = false;
+    // LLVM IR
+    public static final boolean ENABLE_LLVM_IR_OUTPUT = true;
 }

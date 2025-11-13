@@ -4,6 +4,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -48,24 +49,27 @@ public class GetElementPtrInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         // e.g., %1 = getelementptr [10 x i32], [10 x i32]* %a, i32 0, i32 %i
-        //
+        // [cite: 1480] (引用原 toString 逻辑)
 
         StringBuilder sb = new StringBuilder();
-        sb.append(this.getName()).append(" = getelementptr ");
+        sb.append(tracker.getName(this)).append(" = getelementptr ");
 
         // 打印 baseType
         sb.append(this.baseType.toString()).append(", ");
-
         // 打印基指针 (操作数 0)
-        sb.append(getBasePtr().getType().toString()).append(" ").append(getBasePtr().getName());
-
+        sb.append(getBasePtr().getType().toString()).append(" ").append(tracker.getName(getBasePtr()));
         // 打印索引
         for (Value index : getIndices()) {
-            sb.append(", ").append(index.getType().toString()).append(" ").append(index.getName());
+            sb.append(", ").append(index.getType().toString()).append(" ").append(tracker.getName(index));
         }
 
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "GetElementPtrInst<" + this.name + ">@" + hashCode();
     }
 }

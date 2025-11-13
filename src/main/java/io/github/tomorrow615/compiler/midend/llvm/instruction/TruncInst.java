@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class TruncInst extends Instruction {
 
@@ -26,11 +27,14 @@ public class TruncInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         Value val = getValueToTrunc();
-        // e.g., %2 = trunc i32 %1 to i1
-        //
-        return this.getName() + " = trunc " + val.getType().toString() + " " + val.getName()
+        return tracker.getName(this) + " = trunc " + val.getType().toString() + " " + tracker.getName(val)
                 + " to " + this.targetType.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "TruncInst<" + this.name + ">@" + hashCode();
     }
 }

@@ -2,6 +2,7 @@ package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
+import io.github.tomorrow615.compiler.util.*;
 
 public class ConstantInt extends Constant {
 
@@ -30,14 +31,12 @@ public class ConstantInt extends Constant {
     }
 
     @Override
-    public String toString() {
-        // 常量在 IR 中只打印它们的值
+    public String toString(SlotTracker tracker) {
         return String.valueOf(this.value);
     }
 
     @Override
-    public String getName() {
-        // 常量没有 %name，它们的名字就是它们的值
-        return this.toString();
+    public String toString() {
+        return String.valueOf(this.value);
     }
 }

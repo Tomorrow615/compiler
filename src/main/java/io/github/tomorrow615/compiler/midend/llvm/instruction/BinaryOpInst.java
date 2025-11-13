@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class BinaryOpInst extends Instruction {
 
@@ -38,7 +39,7 @@ public class BinaryOpInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         String opStr = switch (op) {
             case ADD -> "add";
             case SUB -> "sub";
@@ -49,7 +50,12 @@ public class BinaryOpInst extends Instruction {
 
         // e.g., %3 = add i32 %1, %2
         // SysY 规定了 nsw (No Signed Wrap)，为简化，我们先不加
-        return this.getName() + " = " + opStr + " " + this.getType().toString()
-                + " " + getLhs().getName() + ", " + getRhs().getName();
+        return tracker.getName(this) + " = " + opStr + " " + this.getType().toString()
+                + " " + tracker.getName(getLhs()) + ", " + tracker.getName(getRhs());
+    }
+
+    @Override
+    public String toString() {
+        return "BinaryOpInst<" + op.name() + ", " + this.name + ">@" + hashCode(); // 调试用
     }
 }

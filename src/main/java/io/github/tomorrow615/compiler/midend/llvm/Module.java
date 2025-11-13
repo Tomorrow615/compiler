@@ -2,6 +2,7 @@ package io.github.tomorrow615.compiler.midend.llvm;
 
 import io.github.tomorrow615.compiler.midend.llvm.value.Function;
 import io.github.tomorrow615.compiler.midend.llvm.value.GlobalVariable;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,19 +34,18 @@ public class Module {
         this.functions.add(func);
     }
 
-    @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         StringBuilder sb = new StringBuilder();
 
-        // 打印全局变量
-        for (GlobalVariable gv : globalVariables) {
-            sb.append(gv.toString()).append("\n");
+        if (!globalVariables.isEmpty()) {
+            for (GlobalVariable gv : globalVariables) {
+                sb.append(gv.toString(tracker)).append("\n");
+            }
+            sb.append("\n"); // 只有在有全局变量时才打印这个换行
         }
-        sb.append("\n");
 
-        // 打印函数
         for (Function func : functions) {
-            sb.append(func.toString()).append("\n");
+            sb.append(func.toString(tracker)).append("\n");
         }
 
         return sb.toString();

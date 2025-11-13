@@ -2,6 +2,7 @@ package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
+import io.github.tomorrow615.compiler.util.*;
 
 public class GlobalVariable extends GlobalValue {
 
@@ -18,25 +19,25 @@ public class GlobalVariable extends GlobalValue {
     }
 
     @Override
-    public String toString() {
-        // e.g., @g = global i32 0
-        // e.g., @.str = private unnamed_addr constant [13 x i8] c"Hello World\00"
-
+    public String toString(SlotTracker tracker) {
+        // 全局变量不依赖 tracker, 但为统一接口
         StringBuilder sb = new StringBuilder();
-        sb.append(this.getName()).append(" = ");
-        // (简化) 我们暂时只支持简单的 global
-        sb.append("global ");
+        sb.append(this.getName()).append(" = dso_local global "); // [cite: 1518-1525] (已更新 dso_local)
 
-        // 类型是指针，我们需要它指向的类型
         Type targetType = ((PointerType) this.type).getTargetType();
         sb.append(targetType.toString());
 
         if (initializer != null) {
-            sb.append(" ").append(initializer.toString());
+            // 假设常量也不需要 tracker
+            sb.append(" ").append(initializer.toString(tracker));
         } else {
-            // SysY 的全局变量如果未初始化，默认为 0
             sb.append(" 0");
         }
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "GlobalVariable<" + this.name + ">@" + hashCode();
     }
 }

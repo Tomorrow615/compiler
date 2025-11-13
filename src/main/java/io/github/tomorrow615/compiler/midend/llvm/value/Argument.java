@@ -1,6 +1,7 @@
 package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
+import io.github.tomorrow615.compiler.util.*;
 
 public class Argument extends Value {
 
@@ -22,7 +23,12 @@ public class Argument extends Value {
     }
 
     @Override
+    public String toString(SlotTracker tracker) {
+        return tracker.getName(this);
+    }
+
+    @Override
     public String toString() {
-        return this.getName();
+        return "Argument<" + this.name + ">@" + hashCode();
     }
 }

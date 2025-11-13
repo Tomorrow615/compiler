@@ -6,6 +6,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Function;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -46,7 +47,7 @@ public class CallInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         StringBuilder sb = new StringBuilder();
         Function func = getFunction();
         Type retType = func.getReturnType();
@@ -56,19 +57,23 @@ public class CallInst extends Instruction {
             sb.append("call void ");
         } else {
             // e.g., %2 = call i32 @getint()
-            sb.append(this.getName()).append(" = call ").append(retType.toString()).append(" ");
+            sb.append(tracker.getName(this)).append(" = call ").append(retType.toString()).append(" ");
         }
 
         // 打印函数名 (e.g., @getint)
-        sb.append(func.getName());
-
+        sb.append(tracker.getName(func));
         // 打印参数列表
         sb.append("(");
         String argsStr = getArguments().stream()
-                .map(arg -> arg.getType().toString() + " " + arg.getName())
+                .map(arg -> arg.getType().toString() + " " + tracker.getName(arg))
                 .collect(Collectors.joining(", "));
         sb.append(argsStr).append(")");
-
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        // 调试用
+        return "CallInst<" + this.name + ">@" + hashCode();
     }
 }

@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class IcmpInst extends Instruction {
 
@@ -39,7 +40,7 @@ public class IcmpInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         String typeStr = switch (cmpType) {
             case EQ -> "eq";
             case NE -> "ne";
@@ -49,8 +50,12 @@ public class IcmpInst extends Instruction {
             case SLE -> "sle";
         };
 
-        // e.g., %5 = icmp eq i32 %3, %4
-        return this.getName() + " = icmp " + typeStr + " " + getLhs().getType().toString()
-                + " " + getLhs().getName() + ", " + getRhs().getName();
+        return tracker.getName(this) + " = icmp " + typeStr + " " + getLhs().getType().toString()
+                + " " + tracker.getName(getLhs()) + ", " + tracker.getName(getRhs());
+    }
+
+    @Override
+    public String toString() {
+        return "IcmpInst<" + cmpType.name() + ", " + this.name + ">@" + hashCode();
     }
 }

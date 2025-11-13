@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.value;
 import io.github.tomorrow615.compiler.midend.llvm.type.FunctionType;
 import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -55,43 +56,40 @@ public class Function extends GlobalValue {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         StringBuilder sb = new StringBuilder();
 
-        // 打印函数声明或定义
-        // e.g., declare i32 @getint()
         if (isDeclaration()) {
             sb.append("declare ");
         } else {
-            // e.g., define dso_local i32 @main(...)
             sb.append("define dso_local ");
         }
 
-        // 打印返回值类型
         sb.append(this.getReturnType().toString()).append(" ");
+        sb.append(tracker.getName(this)); // <-- 修改点: 使用 tracker
 
-        // 打印函数名
-        sb.append(this.getName());
-
-        // 打印参数
         sb.append("(");
         String params = this.arguments.stream()
-                .map(arg -> arg.getType().toString() + " " + arg.getName())
+                // <-- 修改点: 使用 tracker
+                .map(arg -> arg.getType().toString() + " " + tracker.getName(arg))
                 .collect(Collectors.joining(", "));
         sb.append(params).append(")");
 
-        // 如果只是声明，到此结束
         if (isDeclaration()) {
             return sb.toString();
         }
 
-        // 打印函数体
         sb.append(" {\n");
         for (BasicBlock bb : basicBlocks) {
-            sb.append(bb.toString()); // BasicBlock.toString() 会处理指令
+            sb.append(bb.toString(tracker)); // <-- 修改点: 传递 tracker
         }
         sb.append("}\n");
 
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "Function<" + this.name + ">@" + hashCode(); // 调试用
     }
 }

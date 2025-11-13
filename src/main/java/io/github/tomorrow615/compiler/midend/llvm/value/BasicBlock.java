@@ -2,6 +2,7 @@ package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.instruction.Instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.VoidType; // 占位符
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,19 +37,22 @@ public class BasicBlock extends Value {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         StringBuilder sb = new StringBuilder();
 
-        // 打印块标签, e.g., "entry:"
-        // (我们约定 name 不包含 ':', 打印时添加)
-        sb.append(this.getName()).append(":\n");
+        // <-- 修改点: 使用 tracker
+        sb.append(tracker.getName(this)).append(":\n");
 
-        // 打印所有指令
         for (Instruction inst : instructions) {
-            // 指令需要缩进
-            sb.append("  ").append(inst.toString()).append("\n");
+            // <-- 修改点: 传递 tracker
+            sb.append("  ").append(inst.toString(tracker)).append("\n");
         }
 
         return sb.toString();
+    }
+
+    @Override
+    public String toString() {
+        return "BasicBlock<" + this.name + ">@" + hashCode(); // 调试用
     }
 }

@@ -3,9 +3,9 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.VoidType;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class StoreInst extends Instruction {
-
     /**
      * 构造 'store <type> <value>, <type>* <pointer>'
      * @param value 要存储的值
@@ -31,12 +31,15 @@ public class StoreInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         Value val = getValue();
         Value ptr = getPointer();
+        return "store " + val.getType().toString() + " " + tracker.getName(val) + ", "
+                + ptr.getType().toString() + " " + tracker.getName(ptr);
+    }
 
-        // e.g., store i32 %1, i32* %a
-        return "store " + val.getType().toString() + " " + val.getName() + ", "
-                + ptr.getType().toString() + " " + ptr.getName();
+    @Override
+    public String toString() {
+        return "StoreInst@" + hashCode();
     }
 }

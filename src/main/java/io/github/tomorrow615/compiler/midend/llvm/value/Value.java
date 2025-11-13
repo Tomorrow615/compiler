@@ -1,6 +1,7 @@
 package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
+import io.github.tomorrow615.compiler.util.*;
 
 import java.util.List;
 import java.util.ArrayList;
@@ -45,6 +46,11 @@ public abstract class Value {
         this.users.remove(use);
     }
 
+    public abstract String toString(SlotTracker tracker);
+
     @Override
-    public abstract String toString();
+    public String toString() {
+        // 这个方法现在只用于调试
+        return "Value<" + type + ", name=" + name + ">@" + hashCode();
+    }
 }

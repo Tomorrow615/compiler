@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.llvm.instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.User;
+import io.github.tomorrow615.compiler.util.*;
 
 public abstract class Instruction extends User {
 
@@ -41,7 +42,12 @@ public abstract class Instruction extends User {
         this.parentBlock = parentBlock;
     }
 
-    // toString() 由具体的指令子类实现
     @Override
-    public abstract String toString();
+    public abstract String toString(SlotTracker tracker);
+
+    @Override
+    public String toString() {
+        // 这个方法现在只用于调试
+        return "Instruction<" + type + ", name=" + name + ">@" + hashCode();
+    }
 }

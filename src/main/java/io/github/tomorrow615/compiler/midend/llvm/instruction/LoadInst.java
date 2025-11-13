@@ -4,6 +4,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class LoadInst extends Instruction {
 
@@ -26,10 +27,14 @@ public class LoadInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         Value ptr = getPointer();
-        // e.g., %1 = load i32, i32* %a
-        return this.getName() + " = load " + this.getType().toString() + ", "
-                + ptr.getType().toString() + " " + ptr.getName();
+        return tracker.getName(this) + " = load " + this.getType().toString() + ", "
+                + ptr.getType().toString() + " " + tracker.getName(ptr);
+    }
+
+    @Override
+    public String toString() {
+        return "LoadInst<" + this.name + ">@" + hashCode();
     }
 }

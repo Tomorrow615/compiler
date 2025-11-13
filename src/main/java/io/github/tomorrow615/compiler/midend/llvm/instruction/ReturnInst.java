@@ -4,6 +4,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.type.VoidType;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
+import io.github.tomorrow615.compiler.util.*;
 
 public class ReturnInst extends Instruction {
 
@@ -37,14 +38,18 @@ public class ReturnInst extends Instruction {
     }
 
     @Override
-    public String toString() {
+    public String toString(SlotTracker tracker) {
         if (isVoidRet()) {
             return "ret void";
         } else {
             Value retVal = getReturnValue();
-            // e.g., ret i32 %1
-            // e.g., ret i32 0 (ConstantInt)
-            return "ret " + retVal.getType().toString() + " " + retVal.getName();
+            // <-- 修改点: 使用 tracker
+            return "ret " + retVal.getType().toString() + " " + tracker.getName(retVal);
         }
+    }
+
+    @Override
+    public String toString() {
+        return "ReturnInst<" + (isVoidRet() ? "void" : "value") + ">@" + hashCode(); // 调试用
     }
 }
