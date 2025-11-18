@@ -202,7 +202,7 @@ public class StatementIRVisitor {
         // 7. 填充 then 块
         builder.setInsertPoint(thenBB); // [cite: 71, 799]
         visit(node.getThenStmt()); // 递归访问 then 语句体 [cite: 683, 902]
-        if (!hasTerminator(builder.getCurrentBlock())) {
+        if (!builder.getCurrentBlock().hasTerminator()) {
             builder.createBr(mergeBB);
         }
 
@@ -210,7 +210,7 @@ public class StatementIRVisitor {
         if (hasElse) {
             builder.setInsertPoint(elseBB);
             visit(node.getElseStmt()); // 递归访问 else 语句体 [cite: 683, 902]
-            if (!hasTerminator(builder.getCurrentBlock())) {
+            if (!builder.getCurrentBlock().hasTerminator()) {
                 builder.createBr(mergeBB);
             }
         }
@@ -262,23 +262,8 @@ public class StatementIRVisitor {
         builder.setInsertPoint(bodyBB);
         visit(node.getBodyStmt()); // 递归访问循环体
 
-        // 1. 从 BasicBlock 获取指令列表
-        List<Instruction> insts = builder.getCurrentBlock().getInstructions();
-        boolean hasTerminator = false;
-
-        if (!insts.isEmpty()) {
-            // 2. 获取列表中的最后一条指令
-            Instruction lastInst = insts.get(insts.size() - 1);
-
-            // 3. 检查它是否是你的项目  中定义的终结符
-            if (lastInst instanceof BranchInst || lastInst instanceof ReturnInst) {
-                hasTerminator = true;
-            }
-        }
-
-        // 4. 仅在没有终结符时才添加 'br'
-        if (!hasTerminator) {
-            builder.createBr(updateBB); // 循环体末尾无条件跳转到 updateBB
+        if (!builder.getCurrentBlock().hasTerminator()) {
+            builder.createBr(updateBB);
         }
 
         // 6. [Update] 填充 updateBB

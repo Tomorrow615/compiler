@@ -22,3 +22,5 @@ mvnw.cmd
 # Operating System Files
 .DS_Store
 Thumbs.db
+
+*.txt

@@ -13,7 +13,9 @@ public class BinaryOpInst extends Instruction {
         SUB, // -
         MUL, // *
         SDIV, // / (有符号除法)
-        SREM  // % (有符号取余)
+        SREM, // % (有符号取余)
+        AND,  // [新添加]
+        OR    // [新添加]
     }
 
     private final OpCode op;
@@ -46,6 +48,8 @@ public class BinaryOpInst extends Instruction {
             case MUL -> "mul";
             case SDIV -> "sdiv";
             case SREM -> "srem";
+            case AND -> "and"; // [新添加]
+            case OR -> "or";   // [新添加]
         };
 
         // e.g., %3 = add i32 %1, %2

@@ -110,6 +110,16 @@ public class IRBuilder {
         return new BinaryOpInst(BinaryOpInst.OpCode.SREM, lhs, rhs, name, this.currentBlock);
     }
 
+    // [新添加]
+    public Value createAnd(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.AND, lhs, rhs, name, this.currentBlock);
+    }
+
+    // [新添加]
+    public Value createOr(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.OR, lhs, rhs, name, this.currentBlock);
+    }
+
     public Value createIcmp(IcmpInst.CmpType type, Value lhs, Value rhs, String name) {
         return new IcmpInst(type, lhs, rhs, name, this.currentBlock);
     }

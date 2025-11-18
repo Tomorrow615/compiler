@@ -2,6 +2,7 @@ package io.github.tomorrow615.compiler.midend.llvm.value;
 
 import io.github.tomorrow615.compiler.midend.llvm.instruction.Instruction;
 import io.github.tomorrow615.compiler.midend.llvm.type.VoidType; // 占位符
+import io.github.tomorrow615.compiler.midend.llvm.instruction.*;
 import io.github.tomorrow615.compiler.util.*;
 
 import java.util.ArrayList;
@@ -34,6 +35,14 @@ public class BasicBlock extends Value {
 
     public void addInstruction(Instruction inst) {
         this.instructions.add(inst);
+    }
+
+    public boolean hasTerminator() {
+        if (this.instructions.isEmpty()) {
+            return false;
+        }
+        Instruction lastInst = this.instructions.get(this.instructions.size() - 1);
+        return (lastInst instanceof BranchInst || lastInst instanceof ReturnInst);
     }
 
     @Override

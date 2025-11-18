@@ -367,7 +367,7 @@ public class IRGeneratorVisitor {
             }
         }
 
-        if (!hasTerminator) {
+        if (!builder.getCurrentBlock().hasTerminator()) {
             if (retType.isVoidType()) {
                 builder.createRetVoid();
             } else {
@@ -405,10 +405,9 @@ public class IRGeneratorVisitor {
             }
         }
 
-        if (!hasTerminator) {
+        if (!builder.getCurrentBlock().hasTerminator()) {
             builder.createRet(new ConstantInt(0));
         }
-        // --- [ 修复结束 ] ---
 
         exitScope();
         this.currentFunction = null;
@@ -441,6 +440,11 @@ public class IRGeneratorVisitor {
 
     public void visit(BlockNode node) {
         for (BlockItemNode item : node.getBlockItems()) {
+            // [修复] 如果当前块已被 break/continue/ret 终结，
+            // 则停止处理此块中的后续 "死代码"。
+            if (builder.getCurrentBlock().hasTerminator()) {
+                break;
+            }
             visit(item);
         }
     }

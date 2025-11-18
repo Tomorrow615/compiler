@@ -293,7 +293,58 @@ public class ExpressionIRVisitor {
     }
 
     public Value visit(LAndExpNode node) {
-        // ... [ 粘贴 4.5 的 LAndExpNode 逻辑 ] ...
+        if (node == null) return null;
+
+        // 1. 递归访问第一个 EqExp，获取 i32 值
+        Value lhs_i32 = visit(node.getEqExps().get(0));
+
+        // 如果没有 '&&' 操作符，直接返回结果
+        if (node.getOperators().isEmpty()) {
+            return lhs_i32;
+        }
+
+        // 2. 递归访问第二个 EqExp，获取 i32 值
+        // (注意：这只支持 a && b，不支持 a && b && c，但这和你的原代码限制一致)
+        Value rhs_i32 = visit(node.getEqExps().get(1));
+
+        // 3. 将两个 i32 转换为 i1 (bool)
+        Value lhs_i1 = builder.createIcmp(IcmpInst.CmpType.NE, lhs_i32, new ConstantInt(0), "land.lhs.bool");
+        Value rhs_i1 = builder.createIcmp(IcmpInst.CmpType.NE, rhs_i32, new ConstantInt(0), "land.rhs.bool");
+
+        // 4. 对两个 i1 执行 'and' 运算
+        Value result_i1 = builder.createAnd(lhs_i1, rhs_i1, "land.res");
+
+        // 5. 将 i1 结果零扩展回 i32，供 StatementIRVisitor 使用
+        return builder.createZext(result_i1, IntegerType.i32, "zexttmp");
+    }
+
+    public Value visit(LOrExpNode node) {
+        if (node == null) return null;
+
+        // 1. 递归访问第一个 LAndExp，获取 i32 值
+        Value lhs_i32 = visit(node.getlAndExps().get(0));
+
+        // 如果没有 '||' 操作符，直接返回结果
+        if (node.getOperators().isEmpty()) {
+            return lhs_i32;
+        }
+
+        // 2. 递归访问第二个 LAndExp，获取 i32 值
+        Value rhs_i32 = visit(node.getlAndExps().get(1));
+
+        // 3. 将两个 i32 转换为 i1 (bool)
+        Value lhs_i1 = builder.createIcmp(IcmpInst.CmpType.NE, lhs_i32, new ConstantInt(0), "lor.lhs.bool");
+        Value rhs_i1 = builder.createIcmp(IcmpInst.CmpType.NE, rhs_i32, new ConstantInt(0), "lor.rhs.bool");
+
+        // 4. 对两个 i1 执行 'or' 运算
+        Value result_i1 = builder.createOr(lhs_i1, rhs_i1, "lor.res");
+
+        // 5. 将 i1 结果零扩展回 i32
+        return builder.createZext(result_i1, IntegerType.i32, "zexttmp");
+    }
+
+    /*
+    public Value visit(LAndExpNode node) {
         if (node == null) return null;
         Value lhs_i32 = visit(node.getEqExps().get(0));
         if (node.getOperators().isEmpty()) {
@@ -319,7 +370,6 @@ public class ExpressionIRVisitor {
     }
 
     public Value visit(LOrExpNode node) {
-        // ... [ 粘贴 4.5 的 LOrExpNode 逻辑 ] ...
         if (node == null) return null;
         Value lhs_i32 = visit(node.getlAndExps().get(0));
         if (node.getOperators().isEmpty()) {
@@ -343,4 +393,6 @@ public class ExpressionIRVisitor {
         phi.addIncoming(rhs_i1, rhsEndBB);
         return builder.createZext(phi, IntegerType.i32, "zexttmp");
     }
+
+     */
 }
