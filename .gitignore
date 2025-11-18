@@ -23,4 +23,11 @@ mvnw.cmd
 .DS_Store
 Thumbs.db
 
+# 忽略 C 语言源文件 (如果这些只是测试用的)
+*.c
+
+# 忽略 Shell 脚本
+*.sh
+
+# 确保忽略所有 txt (你原来已经有了，保持即可)
 *.txt
