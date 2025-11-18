@@ -46,10 +46,10 @@ public class BranchInst extends Instruction {
         if (isConditional()) {
             Value cond = getOperand(0);
             return "br " + cond.getType().toString() + " " + tracker.getName(cond) + ", "
-                    + "label " + tracker.getName(getOperand(1)) + ", " // trueTarget
-                    + "label " + tracker.getName(getOperand(2)); // falseTarget
+                    + "label %" + tracker.getName(getOperand(1)) + ", "
+                    + "label %" + tracker.getName(getOperand(2));
         } else {
-            return "br label " + tracker.getName(getOperand(0)); // target
+            return "br label %" + tracker.getName(getOperand(0));
         }
     }
 

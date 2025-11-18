@@ -48,7 +48,34 @@ public class IRBuilder {
     }
 
     public Value createAlloca(Type type, String name) {
-        return new AllocaInst(type, name, this.currentBlock);
+        // [旧代码] return new AllocaInst(type, name, this.currentBlock);
+
+        // [新逻辑]
+        Function func = this.getCurrentFunction(); // [cite: 1970]
+
+        // 1. 获取入口块 (总是函数的第一个块)
+        BasicBlock entryBlock = func.getBasicBlocks().get(0);
+
+        // 2. 使用新构造函数创建 alloca，它不会自动添加
+        AllocaInst alloca = new AllocaInst(type, name);
+
+        // 3. 找到入口块中第一个 *非* alloca 指令的索引
+        List<Instruction> instructions = entryBlock.getInstructions(); // [cite: 2387]
+        int insertionPoint = 0;
+        for (Instruction inst : instructions) {
+            if (!(inst instanceof AllocaInst)) {
+                break;
+            }
+            insertionPoint++;
+        }
+
+        // 4. 使用 java.util.List.add(index, element) 在正确位置插入
+        instructions.add(insertionPoint, alloca);
+
+        // 5. 手动设置父块
+        alloca.setParentBlock(entryBlock); // [cite: 2292]
+
+        return alloca;
     }
 
     public Value createLoad(Value ptr, String name) {

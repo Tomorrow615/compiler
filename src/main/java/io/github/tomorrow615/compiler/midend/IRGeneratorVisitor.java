@@ -347,7 +347,9 @@ public class IRGeneratorVisitor {
         Function function = new Function(funcType, "@" + funcSymbol.getName());
         this.module.addFunction(function);
         this.currentFunction = function;
+        builder.setCurrentFunction(function);
         funcSymbol.setLlvmValue(function);
+
         BasicBlock entryBB = new BasicBlock("entry", function);
         builder.setInsertPoint(entryBB);
         enterScope();
@@ -375,6 +377,7 @@ public class IRGeneratorVisitor {
 
         exitScope();
         this.currentFunction = null;
+        builder.setCurrentFunction(null);
     }
 
     public void visit(MainFuncDefNode node) {
@@ -383,7 +386,9 @@ public class IRGeneratorVisitor {
         Function function = new Function(funcType, "@main");
         this.module.addFunction(function);
         this.currentFunction = function;
+        builder.setCurrentFunction(function);
         funcSymbol.setLlvmValue(function);
+
         BasicBlock entryBB = new BasicBlock("entry", function);
         builder.setInsertPoint(entryBB);
         enterScope();
@@ -407,6 +412,7 @@ public class IRGeneratorVisitor {
 
         exitScope();
         this.currentFunction = null;
+        builder.setCurrentFunction(null);
     }
 
     private void visitFuncParams(FuncSymbol funcSymbol, Function function) {

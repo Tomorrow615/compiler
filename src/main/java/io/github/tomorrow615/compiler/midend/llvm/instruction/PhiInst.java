@@ -31,19 +31,15 @@ public class PhiInst extends Instruction {
 
     @Override
     public String toString(SlotTracker tracker) {
-        // e.g., %5 = phi i1 [ true, %3 ], [ %4, %2 ]
         StringBuilder sb = new StringBuilder();
         sb.append(tracker.getName(this)).append(" = phi ").append(this.getType().toString());
-
-        String incomings = "";
         for (int i = 0; i < this.operands.size(); i += 2) {
-            Value val = this.getOperand(i);
-            Value block = this.getOperand(i + 1);
+            Value val = this.getOperand(i);     // [cite: 2307]
+            Value block = this.getOperand(i + 1); // [cite: 2307]
             if (i > 0) sb.append(",");
-            sb.append(" [ ").append(tracker.getName(val)).append(", ").append(tracker.getName(block)).append(" ]");
+            sb.append(" [ ").append(tracker.getName(val)).append(", %").append(tracker.getName(block)).append(" ]");
         }
 
-        sb.append(incomings);
         return sb.toString();
     }
 

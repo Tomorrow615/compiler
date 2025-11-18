@@ -23,6 +23,11 @@ public abstract class Instruction extends User {
         }
     }
 
+    protected Instruction(Type type, String name) {
+        super(type, name);
+        this.parentBlock = null; // 不设置父块，也不自动添加
+    }
+
     /**
      * 构造一条没有名字的指令 (例如 store, ret)
      */

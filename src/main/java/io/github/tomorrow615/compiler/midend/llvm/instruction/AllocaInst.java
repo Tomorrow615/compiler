@@ -21,6 +21,11 @@ public class AllocaInst extends Instruction {
         this.allocatedType = type;
     }
 
+    public AllocaInst(Type type, String name) {
+        super(new PointerType(type), name); // [关键] 调用新的 super 构造函数
+        this.allocatedType = type;
+    }
+
     public Type getAllocatedType() {
         return allocatedType;
     }
