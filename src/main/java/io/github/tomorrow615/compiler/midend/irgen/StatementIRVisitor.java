@@ -172,10 +172,10 @@ public class StatementIRVisitor {
     public void visitForStmt(ForStmtNode node) {
         Function currentFunction = hub.getCurrentFunction();
 
-        BasicBlock condBB = new BasicBlock("for.cond", currentFunction);
-        BasicBlock bodyBB = new BasicBlock("for.body", currentFunction);
-        BasicBlock updateBB = new BasicBlock("for.update", currentFunction);
-        BasicBlock mergeBB = new BasicBlock("for.merge", currentFunction);
+        BasicBlock condBB = new BasicBlock(hub.getNextForCondLabel(), currentFunction);
+        BasicBlock bodyBB = new BasicBlock(hub.getNextForBodyLabel(), currentFunction);
+        BasicBlock updateBB = new BasicBlock(hub.getNextForUpdateLabel(), currentFunction);
+        BasicBlock mergeBB = new BasicBlock(hub.getNextForMergeLabel(), currentFunction);
 
         hub.pushLoop(mergeBB, updateBB);
 

@@ -240,9 +240,9 @@ public class ExpressionIRVisitor {
         }
 
         Function currentFunction = hub.getCurrentFunction();
-        BasicBlock trueBB = new BasicBlock("land.true", currentFunction);
-        BasicBlock falseBB = new BasicBlock("land.false", currentFunction);
-        BasicBlock mergeBB = new BasicBlock("land.merge", currentFunction);
+        BasicBlock trueBB = new BasicBlock(hub.getNextLandTrueLabel(), currentFunction);
+        BasicBlock falseBB = new BasicBlock(hub.getNextLandFalseLabel(), currentFunction);
+        BasicBlock mergeBB = new BasicBlock(hub.getNextLandMergeLabel(), currentFunction);
 
         // 调用控制流生成逻辑
         buildAndBranch(node, trueBB, falseBB);
@@ -267,9 +267,9 @@ public class ExpressionIRVisitor {
         }
 
         Function currentFunction = hub.getCurrentFunction();
-        BasicBlock trueBB = new BasicBlock("lor.true", currentFunction);
-        BasicBlock falseBB = new BasicBlock("lor.false", currentFunction);
-        BasicBlock mergeBB = new BasicBlock("lor.merge", currentFunction);
+        BasicBlock trueBB = new BasicBlock(hub.getNextLorTrueLabel(), currentFunction);
+        BasicBlock falseBB = new BasicBlock(hub.getNextLorFalseLabel(), currentFunction);
+        BasicBlock mergeBB = new BasicBlock(hub.getNextLorMergeLabel(), currentFunction);
 
         // 调用控制流生成逻辑
         buildOrBranch(node, trueBB, falseBB);
@@ -363,8 +363,8 @@ public class ExpressionIRVisitor {
     private void buildOrBranch(LOrExpNode node, BasicBlock trueBB, BasicBlock falseBB) {
         List<LAndExpNode> parts = node.getlAndExps();
         for (int i = 0; i < parts.size() - 1; i++) {
-            BasicBlock nextBB = new BasicBlock("lor.next", hub.getCurrentFunction());
-            buildConditionBranch(parts.get(i), trueBB, nextBB); // 真跳 trueBB，假跳 nextBB
+            BasicBlock nextBB = new BasicBlock(hub.getNextLorNextLabel(), hub.getCurrentFunction());
+            buildConditionBranch(parts.get(i), trueBB, nextBB);
             builder.setInsertPoint(nextBB);
         }
         buildConditionBranch(parts.get(parts.size() - 1), trueBB, falseBB);
@@ -376,8 +376,8 @@ public class ExpressionIRVisitor {
     private void buildAndBranch(LAndExpNode node, BasicBlock trueBB, BasicBlock falseBB) {
         List<EqExpNode> parts = node.getEqExps();
         for (int i = 0; i < parts.size() - 1; i++) {
-            BasicBlock nextBB = new BasicBlock("land.next", hub.getCurrentFunction());
-            buildConditionBranch(parts.get(i), nextBB, falseBB); // 真跳 nextBB，假跳 falseBB
+            BasicBlock nextBB = new BasicBlock(hub.getNextLandNextLabel(), hub.getCurrentFunction());
+            buildConditionBranch(parts.get(i), nextBB, falseBB);
             builder.setInsertPoint(nextBB);
         }
         buildConditionBranch(parts.get(parts.size() - 1), trueBB, falseBB);

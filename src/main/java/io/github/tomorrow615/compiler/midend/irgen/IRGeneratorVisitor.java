@@ -52,6 +52,55 @@ public class IRGeneratorVisitor {
     //          Getter & Helper Methods
     // ==========================================
 
+    public String getNextForCondLabel() {
+        return "for.cond." + (labelCount++);
+    }
+
+    public String getNextForBodyLabel() {
+        return "for.body." + (labelCount++);
+    }
+
+    public String getNextForUpdateLabel() {
+        return "for.update." + (labelCount++);
+    }
+
+    public String getNextForMergeLabel() {
+        return "for.merge." + (labelCount++);
+    }
+
+    // 添加这些新方法
+    public String getNextLorNextLabel() {
+        return "lor.next." + (labelCount++);
+    }
+
+    public String getNextLandNextLabel() {
+        return "land.next." + (labelCount++);
+    }
+
+    public String getNextLorTrueLabel() {
+        return "lor.true." + (labelCount++);
+    }
+
+    public String getNextLorFalseLabel() {
+        return "lor.false." + (labelCount++);
+    }
+
+    public String getNextLorMergeLabel() {
+        return "lor.merge." + (labelCount++);
+    }
+
+    public String getNextLandTrueLabel() {
+        return "land.true." + (labelCount++);
+    }
+
+    public String getNextLandFalseLabel() {
+        return "land.false." + (labelCount++);
+    }
+
+    public String getNextLandMergeLabel() {
+        return "land.merge." + (labelCount++);
+    }
+
     public IRBuilder getBuilder() {
         return this.builder;
     }
@@ -511,6 +560,11 @@ public class IRGeneratorVisitor {
     }
 
     private void visitLocalVarDecl(VarDeclNode node) {
+        if (node.isStatic()) {
+            visitStaticLocalVarDecl(node);
+            return;
+        }
+
         for (VarDefNode def : node.getVarDefs()) {
             ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
             Type type;
@@ -520,6 +574,8 @@ public class IRGeneratorVisitor {
             } else {
                 type = IntegerType.i32;
             }
+
+            // 普通局部变量使用 alloca
             Value ptr = builder.createAlloca(type, symbol.getName() + ".addr");
             symbol.setLlvmValue(ptr);
 
@@ -528,11 +584,8 @@ public class IRGeneratorVisitor {
                     InitValNode initValNode = def.getInitVal();
                     if (initValNode.getType() == InitValNode.Type.ARRAY) {
                         List<ExpNode> initExps = initValNode.getArrayInit();
-
                         for (int i = 0; i < initExps.size(); i++) {
-                            // [修改] 使用 exprVisitor 生成运行时值
                             Value val_i = exprVisitor.visitExpression(initExps.get(i));
-
                             Value zero = new ConstantInt(0);
                             Value i_const = new ConstantInt(i);
                             Value elemPtr = builder.createGep(ptr, List.of(zero, i_const), "init.idx");
@@ -546,6 +599,60 @@ public class IRGeneratorVisitor {
                     }
                 }
             }
+        }
+    }
+
+    private void visitStaticLocalVarDecl(VarDeclNode node) {
+        for (VarDefNode def : node.getVarDefs()) {
+            // 1. 查找符号
+            ValueSymbol symbol = (ValueSymbol) this.currentScope.lookup(def.getIdent().getText());
+            Type type;
+            Constant initializer = null;
+
+            // 2. 确定类型和初始值 (逻辑类似于全局变量)
+            if (symbol.getDimension() > 0) {
+                // 数组
+                int size = symbol.getArraySize();
+                type = new ArrayType(size, IntegerType.i32);
+
+                if (def.getType() == VarDefNode.Type.INITIALIZED && def.getInitVal().getType() == InitValNode.Type.ARRAY) {
+                    List<Constant> initValues = new ArrayList<>();
+                    List<ExpNode> exps = def.getInitVal().getArrayInit();
+                    for (ExpNode exp : exps) {
+                        // SysY 规定：static 变量的初值必须是常量表达式
+                        initValues.add(evalConstExp(new ConstExpNode(exp.getAddExp())));
+                    }
+                    // 0 填充
+                    for (int i = exps.size(); i < size; i++) {
+                        initValues.add(new ConstantInt(0));
+                    }
+                    initializer = new ConstantArray(type, initValues);
+                } else {
+                    // 未初始化 -> zeroinitializer
+                    initializer = new ConstantArray(type, new ArrayList<>());
+                }
+            } else {
+                // 标量
+                type = IntegerType.i32;
+                if (def.getType() == VarDefNode.Type.INITIALIZED) {
+                    // static 变量初值必须是常量
+                    initializer = evalInit(def.getInitVal());
+                } else {
+                    // 未初始化默认为 0
+                    initializer = new ConstantInt(0);
+                }
+            }
+
+            // 3. 创建 GlobalVariable
+            // 为了避免名字冲突 (不同函数内的同名 static 变量)，我们需要构造一个唯一名字
+            // 格式: @funcName.varName.addr
+            String uniqueName = "@" + currentFunction.getName().substring(1) + "." + symbol.getName() + "." + (labelCount++);
+
+            GlobalVariable gv = new GlobalVariable(type, uniqueName, initializer);
+            this.module.addGlobalVariable(gv);
+
+            // 4. 执行桥接：符号表指向这个 GlobalVariable
+            symbol.setLlvmValue(gv);
         }
     }
 }
