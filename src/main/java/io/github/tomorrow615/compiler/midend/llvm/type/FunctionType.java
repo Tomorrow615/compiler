@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 public class FunctionType extends Type {
-
     private final Type returnType;
     private final List<Type> paramTypes;
 
@@ -28,7 +27,6 @@ public class FunctionType extends Type {
 
     @Override
     public String toString() {
-        // 例如: i32 (i32, i8*)
         String params = paramTypes.stream()
                 .map(Type::toString)
                 .collect(Collectors.joining(", "));

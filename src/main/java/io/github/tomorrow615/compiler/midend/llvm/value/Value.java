@@ -10,7 +10,7 @@ public abstract class Value {
     protected final Type type;
     protected String name;
 
-    protected final List<Use> users; // 记录所有 "Use" (使用) 了这个 Value 的 Use 对象
+    protected final List<Use> users; // 谁在使用我
 
     public Value(Type type) {
         this.type = type;
@@ -50,7 +50,6 @@ public abstract class Value {
 
     @Override
     public String toString() {
-        // 这个方法现在只用于调试
         return "Value<" + type + ", name=" + name + ">@" + hashCode();
     }
 }

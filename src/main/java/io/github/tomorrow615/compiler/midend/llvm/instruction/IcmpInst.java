@@ -6,8 +6,6 @@ import io.github.tomorrow615.compiler.midend.llvm.value.Value;
 import io.github.tomorrow615.compiler.util.*;
 
 public class IcmpInst extends Instruction {
-
-    // 定义比较类型
     public enum CmpType {
         EQ,  // == (equal)
         NE,  // != (not equal)
@@ -20,7 +18,6 @@ public class IcmpInst extends Instruction {
     private final CmpType cmpType;
 
     public IcmpInst(CmpType type, Value lhs, Value rhs, String name, BasicBlock parentBlock) {
-        // icmp 的结果必须是 i1
         super(IntegerType.i1, name, parentBlock);
         this.cmpType = type;
         this.addOperand(lhs); // 操作数0: lhs
@@ -49,7 +46,6 @@ public class IcmpInst extends Instruction {
             case SLT -> "slt";
             case SLE -> "sle";
         };
-
         return tracker.getName(this) + " = icmp " + typeStr + " " + getLhs().getType().toString()
                 + " " + tracker.getName(getLhs()) + ", " + tracker.getName(getRhs());
     }

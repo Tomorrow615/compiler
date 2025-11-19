@@ -5,10 +5,10 @@ import io.github.tomorrow615.compiler.frontend.lexer.*;
 import io.github.tomorrow615.compiler.frontend.ast.*;
 import io.github.tomorrow615.compiler.frontend.parser.Parser;
 import io.github.tomorrow615.compiler.frontend.error.Error;
+import io.github.tomorrow615.compiler.midend.irgen.IRGeneratorVisitor;
 import io.github.tomorrow615.compiler.util.*;
 import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
 import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
-import io.github.tomorrow615.compiler.midend.*;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 
 import java.io.BufferedWriter;

@@ -6,9 +6,6 @@ import java.util.List;
 import java.util.ArrayList;
 
 public abstract class User extends Value {
-
-    // "operands" 列表，通过 Use 对象来管理
-    // 这对应了 "User 中的 uselist"
     protected final List<Use> operands;
 
     public User(Type type) {
@@ -33,7 +30,6 @@ public abstract class User extends Value {
     }
 
     public void addOperand(Value value) {
-        // 创建一个新的 Use 连线，"this" (User) 使用 "value" (Value)
         Use newUse = new Use(this, value);
         this.operands.add(newUse);
     }
@@ -42,7 +38,6 @@ public abstract class User extends Value {
         if (index < 0 || index >= operands.size()) {
             throw new IndexOutOfBoundsException("Operand index out of bounds");
         }
-        // Use 对象会自动处理旧 Value 的解绑和新 Value 的绑定
         this.operands.get(index).setValue(value);
     }
 }

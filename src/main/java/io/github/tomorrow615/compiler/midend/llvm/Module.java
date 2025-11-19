@@ -8,10 +8,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Module {
-
     private final List<GlobalVariable> globalVariables;
     private final List<Function> functions;
-    // 还可以添加 target triple, datalayout 等元信息
 
     public Module() {
         this.globalVariables = new ArrayList<>();
@@ -36,18 +34,15 @@ public class Module {
 
     public String toString(SlotTracker tracker) {
         StringBuilder sb = new StringBuilder();
-
         if (!globalVariables.isEmpty()) {
             for (GlobalVariable gv : globalVariables) {
                 sb.append(gv.toString(tracker)).append("\n");
             }
-            sb.append("\n"); // 只有在有全局变量时才打印这个换行
+            sb.append("\n");
         }
-
         for (Function func : functions) {
             sb.append(func.toString(tracker)).append("\n");
         }
-
         return sb.toString();
     }
 }

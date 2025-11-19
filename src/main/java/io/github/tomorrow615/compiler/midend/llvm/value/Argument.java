@@ -4,9 +4,8 @@ import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.util.*;
 
 public class Argument extends Value {
-
     private final Function parentFunction;
-    private final int index; // 参数索引
+    private final int index;
 
     public Argument(Type type, String name, Function parentFunction, int index) {
         super(type, name);

@@ -6,23 +6,15 @@ import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.util.*;
 
 public class AllocaInst extends Instruction {
+    private final Type allocatedType;
 
-    private final Type allocatedType; // 要分配的类型 (e.g., i32, [10 x i32])
-
-    /**
-     * 构造 'alloca <type>'
-     * @param type 要分配的类型
-     * @param name 结果指针的名字 (e.g., %a)
-     * @param parentBlock 插入到的基本块
-     */
     public AllocaInst(Type type, String name, BasicBlock parentBlock) {
-        // alloca 指令的结果是一个指向 'type' 的指针
         super(new PointerType(type), name, parentBlock);
         this.allocatedType = type;
     }
 
     public AllocaInst(Type type, String name) {
-        super(new PointerType(type), name); // [关键] 调用新的 super 构造函数
+        super(new PointerType(type), name);
         this.allocatedType = type;
     }
 

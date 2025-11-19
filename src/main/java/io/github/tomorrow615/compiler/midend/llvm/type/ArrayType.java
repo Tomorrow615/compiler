@@ -1,7 +1,6 @@
 package io.github.tomorrow615.compiler.midend.llvm.type;
 
 public class ArrayType extends Type {
-
     private final int numElements;
     private final Type elementType;
 
@@ -25,7 +24,6 @@ public class ArrayType extends Type {
 
     @Override
     public String toString() {
-        // 例如: [10 x i32]
         return "[" + numElements + " x " + elementType.toString() + "]";
     }
 }

@@ -1,4 +1,4 @@
-package io.github.tomorrow615.compiler.midend;
+package io.github.tomorrow615.compiler.midend.irgen;
 
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 import io.github.tomorrow615.compiler.midend.llvm.instruction.*;
@@ -9,18 +9,12 @@ import io.github.tomorrow615.compiler.midend.llvm.value.Value;
 
 import java.util.List;
 
-/**
- * IRBuilder "画笔"
- * 封装了指令创建并自动插入到 BasicBlock 的逻辑。
- */
 public class IRBuilder {
-
     private Module module;
     private Function currentFunction;
     private BasicBlock currentBlock;
 
     public IRBuilder() {
-        // 初始为空，由 IRGeneratorVisitor 填充
     }
 
     public void setModule(Module module) {
@@ -48,19 +42,13 @@ public class IRBuilder {
     }
 
     public Value createAlloca(Type type, String name) {
-        // [旧代码] return new AllocaInst(type, name, this.currentBlock);
-
-        // [新逻辑]
-        Function func = this.getCurrentFunction(); // [cite: 1970]
-
+        Function func = this.getCurrentFunction();
         // 1. 获取入口块 (总是函数的第一个块)
         BasicBlock entryBlock = func.getBasicBlocks().get(0);
-
         // 2. 使用新构造函数创建 alloca，它不会自动添加
         AllocaInst alloca = new AllocaInst(type, name);
-
         // 3. 找到入口块中第一个 *非* alloca 指令的索引
-        List<Instruction> instructions = entryBlock.getInstructions(); // [cite: 2387]
+        List<Instruction> instructions = entryBlock.getInstructions();
         int insertionPoint = 0;
         for (Instruction inst : instructions) {
             if (!(inst instanceof AllocaInst)) {
@@ -68,13 +56,10 @@ public class IRBuilder {
             }
             insertionPoint++;
         }
-
         // 4. 使用 java.util.List.add(index, element) 在正确位置插入
         instructions.add(insertionPoint, alloca);
-
         // 5. 手动设置父块
-        alloca.setParentBlock(entryBlock); // [cite: 2292]
-
+        alloca.setParentBlock(entryBlock);
         return alloca;
     }
 
@@ -110,33 +95,27 @@ public class IRBuilder {
         return new BinaryOpInst(BinaryOpInst.OpCode.SREM, lhs, rhs, name, this.currentBlock);
     }
 
-    // [新添加]
-    public Value createAnd(Value lhs, Value rhs, String name) {
-        return new BinaryOpInst(BinaryOpInst.OpCode.AND, lhs, rhs, name, this.currentBlock);
-    }
-
-    // [新添加]
-    public Value createOr(Value lhs, Value rhs, String name) {
-        return new BinaryOpInst(BinaryOpInst.OpCode.OR, lhs, rhs, name, this.currentBlock);
-    }
-
     public Value createIcmp(IcmpInst.CmpType type, Value lhs, Value rhs, String name) {
         return new IcmpInst(type, lhs, rhs, name, this.currentBlock);
     }
 
     public Instruction createRet(Value value) {
+        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
         return new ReturnInst(value, this.currentBlock);
     }
 
     public Instruction createRetVoid() {
+        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
         return new ReturnInst(this.currentBlock);
     }
 
     public Instruction createBr(BasicBlock target) {
+        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
         return new BranchInst(target, this.currentBlock);
     }
 
     public Instruction createCondBr(Value cond, BasicBlock trueTarget, BasicBlock falseTarget) {
+        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
         return new BranchInst(cond, trueTarget, falseTarget, this.currentBlock);
     }
 
@@ -145,11 +124,8 @@ public class IRBuilder {
     }
 
     public PhiInst createPhi(Type type, String name) {
-        // 注意：PHI 指令必须是 BB 的第一条指令
-        // 为简单起见，我们先在末尾添加，后续优化时再调整
         return new PhiInst(type, name, this.currentBlock);
     }
-
 
     public Value createZext(Value value, Type targetType, String name) {
         return new ZextInst(value, targetType, name, this.currentBlock);
