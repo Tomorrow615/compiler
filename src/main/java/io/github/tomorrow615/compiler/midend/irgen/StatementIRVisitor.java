@@ -91,6 +91,13 @@ public class StatementIRVisitor {
         String formatString = (String) formatStringToken.getValue();
         List<ExpNode> exps = node.getExps();
 
+        // [修复] 1. 先计算所有参数的值 (LLVM IR 指令会按此顺序生成)
+        // 确保参数中的函数调用（及其副作用如打印）先于 printf 的字符串输出执行
+        java.util.List<Value> evaluatedValues = new java.util.ArrayList<>();
+        for (ExpNode exp : exps) {
+            evaluatedValues.add(exprVisitor.visitExpression(exp));
+        }
+
         int expIndex = 0;
         Function putintFunc = hub.getIoFunctions().get("putint");
         Function putstrFunc = hub.getIoFunctions().get("putstr");
@@ -100,15 +107,15 @@ public class StatementIRVisitor {
         for (int i = 0; i < formatString.length(); i++) {
             if (formatString.charAt(i) == '%') {
                 if (i + 1 < formatString.length() && formatString.charAt(i + 1) == 'd') {
-                    // 1. 遇到 %d，先把前面收集的字符串打印出去
+                    // 2. 遇到 %d，先把前面收集的字符串打印出去
                     if (strFragment.length() > 0) {
                         printStringFragment(strFragment.toString(), putstrFunc);
                         strFragment.setLength(0);
                     }
 
-                    // 2. 打印 %d 对应的表达式
-                    if (expIndex < exps.size()) {
-                        Value val = exprVisitor.visitExpression(exps.get(expIndex++));
+                    // 3. [修复] 使用预先计算好的值，而不是现在才 visit
+                    if (expIndex < evaluatedValues.size()) {
+                        Value val = evaluatedValues.get(expIndex++);
                         builder.createCall(putintFunc, List.of(val), "");
                     }
                     i++; // 跳过 'd'
