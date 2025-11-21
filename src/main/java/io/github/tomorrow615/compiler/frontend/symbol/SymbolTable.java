@@ -28,10 +28,9 @@ public class SymbolTable {
         return true;
     }
 
-    // 这个方法用于添加内置函数，如 getint 和 printf
+    // 内置函数
     public void addBuiltInSymbol(Symbol symbol) {
         String name = symbol.getName();
-        // 假设内置函数不会重定义
         if (!symbols.containsKey(name)) {
             symbols.put(name, symbol);
         }

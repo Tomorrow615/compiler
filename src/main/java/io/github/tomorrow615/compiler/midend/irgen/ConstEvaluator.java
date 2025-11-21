@@ -5,10 +5,6 @@ import io.github.tomorrow615.compiler.frontend.lexer.TokenType;
 import io.github.tomorrow615.compiler.frontend.symbol.Symbol;
 import io.github.tomorrow615.compiler.frontend.symbol.ValueSymbol;
 
-/**
- * 编译期常量求值器
- * 负责计算 ConstExp 的值，用于全局变量初始化和数组维度定义
- */
 public class ConstEvaluator {
     private final IRGenContext context;
 
@@ -20,7 +16,6 @@ public class ConstEvaluator {
         return calcAddExp(node.getAddExp());
     }
 
-    // 递归计算辅助方法
     private int calcAddExp(AddExpNode node) {
         int val = calcMulExp(node.getMulExps().get(0));
         for (int i = 0; i < node.getOperators().size(); i++) {

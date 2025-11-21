@@ -67,7 +67,7 @@ public class Compiler {
                 IRGenerator irGenerator = new IRGenerator(compUnit, allScopes);
                 Module llvmModule = irGenerator.generate();
 
-                // --- [步骤 6: 打印 LLVM IR ---
+                // --- 步骤 6: 打印 LLVM IR ---
                 try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
                     irPrinter.print(llvmModule);
                 }

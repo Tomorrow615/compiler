@@ -17,8 +17,6 @@ public class IRBuilder {
     public IRBuilder() {
     }
 
-    // ==================== 状态管理 ====================
-
     public void setModule(Module module) {
         this.module = module;
     }
@@ -43,13 +41,6 @@ public class IRBuilder {
         return currentBlock;
     }
 
-    // ==================== 指令生成 ====================
-
-    /**
-     * 创建 alloca 指令。
-     * 特殊处理：该指令会被自动提升到当前函数的 Entry Block 头部，
-     * 而不是插入到 currentBlock。
-     */
     public Value createAlloca(Type type, String name) {
         // 1. 创建指令 (不指定父块，处于游离状态)
         AllocaInst alloca = new AllocaInst(type, name);

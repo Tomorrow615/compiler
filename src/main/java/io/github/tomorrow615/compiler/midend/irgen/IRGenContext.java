@@ -1,24 +1,22 @@
 package io.github.tomorrow615.compiler.midend.irgen;
 
+import io.github.tomorrow615.compiler.frontend.symbol.FuncSymbol;
+import io.github.tomorrow615.compiler.frontend.symbol.Symbol;
 import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
 import io.github.tomorrow615.compiler.midend.llvm.value.Function;
 import io.github.tomorrow615.compiler.midend.llvm.value.GlobalVariable;
-import io.github.tomorrow615.compiler.midend.llvm.type.ArrayType;
-import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
+import io.github.tomorrow615.compiler.midend.llvm.type.*;
 import io.github.tomorrow615.compiler.midend.llvm.value.Constant;
 import io.github.tomorrow615.compiler.midend.llvm.value.ConstantString;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 
-/**
- * IR生成过程中的上下文环境
- * 负责持有：Module, Builder, 作用域, 循环栈, 全局资源表
- */
 public class IRGenContext {
     // 核心组件
     private final Module module;
@@ -27,7 +25,7 @@ public class IRGenContext {
 
     // 作用域管理
     private SymbolTable currentMetadataScope; // 完整元数据表 (来自 SemanticVisitor)
-    private SymbolTable currentActualScope;   // 动态构建的当前可见表 (用于 lookup)
+    private SymbolTable currentActualScope; // 动态构建的当前可见表 (用于 lookup)
     private int scopeIndex = 0;
 
     // 函数与全局资源
@@ -54,6 +52,66 @@ public class IRGenContext {
             this.currentMetadataScope = allScopes.get(scopeIndex++);
             // 创建一个新的空全局作用域作为起点
             this.currentActualScope = new SymbolTable(null, this.currentMetadataScope.getScopeId());
+        }
+
+        // [新增] 初始化内置 IO 函数
+        initBuiltInFunctions();
+    }
+
+    // ==================== 初始化内置函数 ====================
+
+    private void initBuiltInFunctions() {
+        // getint
+        FunctionType getintType = new FunctionType(IntegerType.i32, new ArrayList<>());
+        Function getintFunc = new Function(getintType, "@getint");
+        this.module.addFunction(getintFunc);
+        this.ioFunctions.put("getint", getintFunc);
+        if (currentMetadataScope != null) {
+            Symbol getintSym = currentMetadataScope.lookup("getint");
+            if (getintSym instanceof FuncSymbol) {
+                ((FuncSymbol) getintSym).setLlvmValue(getintFunc);
+                currentActualScope.addSymbol(getintSym);
+            }
+        }
+
+        // putint
+        FunctionType putintType = new FunctionType(VoidType.get(), List.of(IntegerType.i32));
+        Function putintFunc = new Function(putintType, "@putint");
+        this.module.addFunction(putintFunc);
+        this.ioFunctions.put("putint", putintFunc);
+        if (currentMetadataScope != null) {
+            Symbol putintSym = currentMetadataScope.lookup("putint");
+            if (putintSym != null)
+                currentActualScope.addSymbol(putintSym);
+        }
+
+        // putch
+        FunctionType putchType = new FunctionType(VoidType.get(), List.of(IntegerType.i32));
+        Function putchFunc = new Function(putchType, "@putch");
+        this.module.addFunction(putchFunc);
+        this.ioFunctions.put("putch", putchFunc);
+        if (currentMetadataScope != null) {
+            Symbol putchSym = currentMetadataScope.lookup("putch");
+            if (putchSym != null)
+                currentActualScope.addSymbol(putchSym);
+        }
+
+        // putstr
+        PointerType i8Ptr = new PointerType(IntegerType.i8);
+        FunctionType putstrType = new FunctionType(VoidType.get(), List.of(i8Ptr));
+        Function putstrFunc = new Function(putstrType, "@putstr");
+        this.module.addFunction(putstrFunc);
+        this.ioFunctions.put("putstr", putstrFunc);
+        // 注意：printf 不需要绑定 llvmValue，因为它在 StmtGenerator 中是直接通过 ioFunctions 获取的
+        // 但为了保持符号表的一致性，我们还是加上它
+        if (currentMetadataScope != null) {
+            Symbol printfSym = currentMetadataScope.lookup("printf");
+            if (printfSym instanceof FuncSymbol) {
+                // 这里是否需要 setLlvmValue 取决于你的 printf 实现
+                // 但通常 printf 是作为 Stmt 处理的，不走 Expr 的 FuncCall
+                // ((FuncSymbol) printfSym).setLlvmValue(putstrFunc);
+                currentActualScope.addSymbol(printfSym);
+            }
         }
     }
 

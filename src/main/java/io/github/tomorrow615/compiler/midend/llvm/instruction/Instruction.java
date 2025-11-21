@@ -18,7 +18,7 @@ public abstract class Instruction extends User {
 
     protected Instruction(Type type, String name) {
         super(type, name);
-        this.parentBlock = null; // 不设置父块，也不自动添加
+        this.parentBlock = null;
     }
 
     public Instruction(Type type, BasicBlock parentBlock) {
