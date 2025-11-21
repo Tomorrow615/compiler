@@ -17,6 +17,8 @@ public class IRBuilder {
     public IRBuilder() {
     }
 
+    // ==================== 状态管理 ====================
+
     public void setModule(Module module) {
         this.module = module;
     }
@@ -41,25 +43,18 @@ public class IRBuilder {
         return currentBlock;
     }
 
+    // ==================== 指令生成 ====================
+
+    /**
+     * 创建 alloca 指令。
+     * 特殊处理：该指令会被自动提升到当前函数的 Entry Block 头部，
+     * 而不是插入到 currentBlock。
+     */
     public Value createAlloca(Type type, String name) {
-        Function func = this.getCurrentFunction();
-        // 1. 获取入口块 (总是函数的第一个块)
-        BasicBlock entryBlock = func.getBasicBlocks().get(0);
-        // 2. 使用新构造函数创建 alloca，它不会自动添加
+        // 1. 创建指令 (不指定父块，处于游离状态)
         AllocaInst alloca = new AllocaInst(type, name);
-        // 3. 找到入口块中第一个 *非* alloca 指令的索引
-        List<Instruction> instructions = entryBlock.getInstructions();
-        int insertionPoint = 0;
-        for (Instruction inst : instructions) {
-            if (!(inst instanceof AllocaInst)) {
-                break;
-            }
-            insertionPoint++;
-        }
-        // 4. 使用 java.util.List.add(index, element) 在正确位置插入
-        instructions.add(insertionPoint, alloca);
-        // 5. 手动设置父块
-        alloca.setParentBlock(entryBlock);
+        // 2. 插入到入口块合适的位置
+        insertToEntryBlock(alloca);
         return alloca;
     }
 
@@ -100,22 +95,22 @@ public class IRBuilder {
     }
 
     public Instruction createRet(Value value) {
-        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
+        if (hasTerminator()) return null;
         return new ReturnInst(value, this.currentBlock);
     }
 
     public Instruction createRetVoid() {
-        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
+        if (hasTerminator()) return null;
         return new ReturnInst(this.currentBlock);
     }
 
     public Instruction createBr(BasicBlock target) {
-        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
+        if (hasTerminator()) return null;
         return new BranchInst(target, this.currentBlock);
     }
 
     public Instruction createCondBr(Value cond, BasicBlock trueTarget, BasicBlock falseTarget) {
-        if (currentBlock != null && currentBlock.hasTerminator()) return null; // 防御性检查
+        if (hasTerminator()) return null;
         return new BranchInst(cond, trueTarget, falseTarget, this.currentBlock);
     }
 
@@ -133,5 +128,32 @@ public class IRBuilder {
 
     public Value createTrunc(Value value, Type targetType, String name) {
         return new TruncInst(value, targetType, name, this.currentBlock);
+    }
+
+    // ==================== 私有辅助方法 ====================
+
+    /**
+     * 将指令插入到当前函数的 Entry Block (第一个基本块) 的头部。
+     * 通常用于 alloca 指令，以确保所有栈分配都在函数开始时进行。
+     * 插入位置会跳过已有的 alloca 指令，保持它们聚在一起。
+     */
+    private void insertToEntryBlock(AllocaInst alloca) {
+        BasicBlock entryBlock = currentFunction.getBasicBlocks().get(0);
+        List<Instruction> instructions = entryBlock.getInstructions();
+
+        int insertionPoint = 0;
+        for (Instruction inst : instructions) {
+            if (!(inst instanceof AllocaInst)) {
+                break;
+            }
+            insertionPoint++;
+        }
+
+        instructions.add(insertionPoint, alloca);
+        alloca.setParentBlock(entryBlock);
+    }
+
+    private boolean hasTerminator() {
+        return currentBlock != null && currentBlock.hasTerminator();
     }
 }

@@ -5,7 +5,7 @@ import io.github.tomorrow615.compiler.frontend.lexer.*;
 import io.github.tomorrow615.compiler.frontend.ast.*;
 import io.github.tomorrow615.compiler.frontend.parser.Parser;
 import io.github.tomorrow615.compiler.frontend.error.Error;
-import io.github.tomorrow615.compiler.midend.irgen.IRGeneratorVisitor;
+import io.github.tomorrow615.compiler.midend.irgen.IRGenerator;
 import io.github.tomorrow615.compiler.util.*;
 import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
 import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
@@ -64,8 +64,8 @@ public class Compiler {
                 }
             } else {
                 // --- 步骤 5: IR 生成 ---
-                IRGeneratorVisitor irVisitor = new IRGeneratorVisitor(compUnit, allScopes);
-                Module llvmModule = irVisitor.generate(); // 开始遍历并生成 IR
+                IRGenerator irGenerator = new IRGenerator(compUnit, allScopes);
+                Module llvmModule = irGenerator.generate();
 
                 // --- [步骤 6: 打印 LLVM IR ---
                 try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
