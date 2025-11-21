@@ -147,7 +147,7 @@ public class IRGenerator {
 
     private void visitVarDecl(VarDeclNode node) {
         if (node.isStatic())
-            visitStaticLocalVarDecl(node); // 静态局部变量当做全局处理逻辑类似
+            visitStaticLocalVarDecl(node);
         else if (context.getCurrentFunction() == null)
             visitGlobalVarDecl(node);
         else
@@ -155,7 +155,6 @@ public class IRGenerator {
     }
 
     // --- Global / Static ---
-
     private void visitGlobalConstDecl(ConstDeclNode node) {
         for (ConstDefNode def : node.getConstDefs()) {
             ValueSymbol symbol = (ValueSymbol) context.getCurrentMetadataScope().lookup(def.getIdent().getText());
@@ -175,17 +174,14 @@ public class IRGenerator {
     private void visitStaticLocalVarDecl(VarDeclNode node) {
         for (VarDefNode def : node.getVarDefs()) {
             ValueSymbol symbol = (ValueSymbol) context.getCurrentMetadataScope().lookup(def.getIdent().getText());
-            // 生成唯一名称
             String uniqueName = context
                     .getNextLabel("@" + context.getCurrentFunction().getName().substring(1) + "." + symbol.getName());
-            // 逻辑与全局变量一致，但使用唯一名
             handleStaticInit(symbol, def.getInitVal(), uniqueName);
             context.getCurrentScope().addSymbol(symbol);
         }
     }
 
     // --- Local ---
-
     private void visitLocalConstDecl(ConstDeclNode node) {
         IRBuilder builder = context.getBuilder();
         for (ConstDefNode def : node.getConstDefs()) {
@@ -215,7 +211,8 @@ public class IRGenerator {
     private void visitLocalVarDecl(VarDeclNode node) {
         IRBuilder builder = context.getBuilder();
         for (VarDefNode def : node.getVarDefs()) {
-            ValueSymbol symbol = (ValueSymbol) context.getCurrentMetadataScope().lookup(def.getIdent().getText());
+            ValueSymbol symbol = (ValueSymbol) context.getCurrentMetadataScope()
+                    .lookup(def.getIdent().getText());
             Type type = (symbol.getDimension() > 0)
                     ? new ArrayType(symbol.getArraySize(), IntegerType.i32)
                     : IntegerType.i32;
@@ -235,75 +232,56 @@ public class IRGenerator {
         }
     }
 
-    // ==================== 初始化辅助方法 ====================
-
+    // handle
     private void handleGlobalInit(ValueSymbol symbol, ASTNode initValNode, boolean isConst) {
+        createGlobalVariableCommon(symbol, initValNode, "@" + symbol.getName(), isConst);
+    }
+
+    private void handleStaticInit(ValueSymbol symbol, ASTNode initValNode, String uniqueName) {
+        createGlobalVariableCommon(symbol, initValNode, uniqueName, false);
+    }
+
+    private void createGlobalVariableCommon(ValueSymbol symbol, ASTNode initValNode, String globalName, boolean isConst) {
         Type type;
         Constant initializer;
+
         if (symbol.getDimension() > 0) {
             int size = symbol.getArraySize();
             type = new ArrayType(size, IntegerType.i32);
             List<Constant> initValues = new ArrayList<>();
-            List<Integer> intValues = new ArrayList<>(); // for const table
-
+            List<Integer> intValues = isConst ? new ArrayList<>() : null;
             List<? extends ASTNode> exps = getArrayInitExps(initValNode);
             if (exps != null) {
                 for (ASTNode exp : exps) {
-                    // 全局/静态变量初始化必须是 ConstExp
                     ConstExpNode constExp = (exp instanceof ConstExpNode) ? (ConstExpNode) exp
                             : new ConstExpNode(((ExpNode) exp).getAddExp());
-                    Constant val = new ConstantInt(evaluator.eval(constExp));
+                    int valInt = evaluator.eval(constExp);
+                    ConstantInt val = new ConstantInt(valInt);
                     initValues.add(val);
-                    intValues.add(((ConstantInt) val).getValue());
+                    if (isConst) intValues.add(valInt);
                 }
             }
-            // 补零
             while (initValues.size() < size) {
                 initValues.add(new ConstantInt(0));
-                intValues.add(0);
+                if (isConst) intValues.add(0);
             }
             initializer = new ConstantArray(type, initValues);
-            if (isConst)
-                symbol.setConstArrayValues(intValues);
-        } else {
+            if (isConst) symbol.setConstArrayValues(intValues);
+
+        }
+        else {
             type = IntegerType.i32;
             Constant val = evalInitVal(initValNode);
             initializer = val;
             if (isConst && val instanceof ConstantInt ci)
                 symbol.setConstValue(ci.getValue());
         }
-        GlobalVariable gv = new GlobalVariable(type, "@" + symbol.getName(), initializer);
+
+        GlobalVariable gv = new GlobalVariable(type, globalName, initializer);
         context.getModule().addGlobalVariable(gv);
         symbol.setLlvmValue(gv);
     }
 
-    private void handleStaticInit(ValueSymbol symbol, ASTNode initValNode, String uniqueName) {
-        // 逻辑与 GlobalInit 基本一致，只是 gv 名字不同
-        Type type;
-        Constant initializer;
-        if (symbol.getDimension() > 0) {
-            int size = symbol.getArraySize();
-            type = new ArrayType(size, IntegerType.i32);
-            List<Constant> initValues = new ArrayList<>();
-            List<? extends ASTNode> exps = getArrayInitExps(initValNode);
-            if (exps != null) {
-                for (ASTNode exp : exps) {
-                    ConstExpNode constExp = (exp instanceof ConstExpNode) ? (ConstExpNode) exp
-                            : new ConstExpNode(((ExpNode) exp).getAddExp());
-                    initValues.add(new ConstantInt(evaluator.eval(constExp)));
-                }
-            }
-            while (initValues.size() < size)
-                initValues.add(new ConstantInt(0));
-            initializer = new ConstantArray(type, initValues);
-        } else {
-            type = IntegerType.i32;
-            initializer = evalInitVal(initValNode);
-        }
-        GlobalVariable gv = new GlobalVariable(type, uniqueName, initializer);
-        context.getModule().addGlobalVariable(gv);
-        symbol.setLlvmValue(gv);
-    }
 
     private void handleLocalArrayInit(Value ptr, ValueSymbol symbol, ASTNode initValNode, boolean isConst) {
         IRBuilder builder = context.getBuilder();
@@ -316,23 +294,18 @@ public class IRGenerator {
 
         for (int i = 0; i < exps.size(); i++) {
             ASTNode exp = exps.get(i);
-            // 运行时 Store
             Value val;
             if (isConst)
                 val = exprGen.visitConstExp((ConstExpNode) exp);
             else
                 val = exprGen.visitExpression(exp);
-
             Value elemPtr = builder.createGep(ptr, List.of(new ConstantInt(0), new ConstantInt(i)), "init.idx");
             builder.createStore(val, elemPtr);
-
-            // 编译期求值 (仅 Const 需要)
             if (isConst) {
                 int v = evaluator.eval((ConstExpNode) exp);
                 intValues.add(v);
             }
         }
-        // 局部数组初始化：如果没填满，需要补零 (SysY语义: 部分初始化其余补0)
         if (exps.size() < size) {
             Value zeroVal = new ConstantInt(0);
             Value zeroIdx = new ConstantInt(0);
@@ -346,8 +319,6 @@ public class IRGenerator {
         if (isConst)
             symbol.setConstArrayValues(intValues);
     }
-
-    // === 适配器方法：处理 ConstInitValNode 和 InitValNode 的差异 ===
 
     private Constant evalInitVal(ASTNode node) {
         if (node == null)

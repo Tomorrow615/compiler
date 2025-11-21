@@ -4,7 +4,6 @@ import io.github.tomorrow615.compiler.frontend.ast.expr.*;
 import io.github.tomorrow615.compiler.frontend.ast.stmt.*;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
 
-import java.beans.Expression;
 import java.util.List;
 import java.util.ArrayList;
 
@@ -12,7 +11,8 @@ public class StatementGenerator {
     private final IRGenContext context;
     private final IRBuilder builder;
     private final ExpressionGenerator exprGen;
-    private final IRGenerator mainGen; // 回调主生成器处理 Block
+    private final IRGenerator mainGen;
+    private BreakStmtNode node;
 
     public StatementGenerator(IRGenContext context, ExpressionGenerator exprGen, IRGenerator mainGen) {
         this.context = context;
@@ -33,7 +33,7 @@ public class StatementGenerator {
         else if (node instanceof ContinueStmtNode c) visitContinueStmt(c);
         else if (node instanceof BlockNode b) {
             context.enterScope();
-            mainGen.visitBlock(b); // 回调主生成器，处理块内的 Declaration
+            mainGen.visitBlock(b);
             context.exitScope();
         }
     }
@@ -64,8 +64,6 @@ public class StatementGenerator {
     public void visitPrintfStmt(PrintfStmtNode node) {
         String formatString = (String) node.getFormatString().getValue();
         List<ExpNode> exps = node.getExps();
-
-        // 1. 先计算所有参数
         List<Value> evaluatedValues = new ArrayList<>();
         for (ExpNode exp : exps) {
             evaluatedValues.add(exprGen.visitExpression(exp));
@@ -78,7 +76,7 @@ public class StatementGenerator {
 
         for (int i = 0; i < formatString.length(); i++) {
             if (formatString.charAt(i) == '%' && i + 1 < formatString.length() && formatString.charAt(i + 1) == 'd') {
-                if (strFragment.length() > 0) {
+                if (!strFragment.isEmpty()) {
                     printStringFragment(strFragment.toString(), putstrFunc);
                     strFragment.setLength(0);
                 }
@@ -90,7 +88,7 @@ public class StatementGenerator {
                 strFragment.append(formatString.charAt(i));
             }
         }
-        if (strFragment.length() > 0) {
+        if (!strFragment.isEmpty()) {
             printStringFragment(strFragment.toString(), putstrFunc);
         }
     }
@@ -169,6 +167,7 @@ public class StatementGenerator {
     }
 
     public void visitBreakStmt(BreakStmtNode node) {
+        this.node = node;
         builder.createBr(context.getCurrentLoopMergeBB());
     }
 

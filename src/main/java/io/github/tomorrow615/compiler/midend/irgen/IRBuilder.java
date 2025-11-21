@@ -42,9 +42,7 @@ public class IRBuilder {
     }
 
     public Value createAlloca(Type type, String name) {
-        // 1. 创建指令 (不指定父块，处于游离状态)
         AllocaInst alloca = new AllocaInst(type, name);
-        // 2. 插入到入口块合适的位置
         insertToEntryBlock(alloca);
         return alloca;
     }
@@ -121,13 +119,6 @@ public class IRBuilder {
         return new TruncInst(value, targetType, name, this.currentBlock);
     }
 
-    // ==================== 私有辅助方法 ====================
-
-    /**
-     * 将指令插入到当前函数的 Entry Block (第一个基本块) 的头部。
-     * 通常用于 alloca 指令，以确保所有栈分配都在函数开始时进行。
-     * 插入位置会跳过已有的 alloca 指令，保持它们聚在一起。
-     */
     private void insertToEntryBlock(AllocaInst alloca) {
         BasicBlock entryBlock = currentFunction.getBasicBlocks().get(0);
         List<Instruction> instructions = entryBlock.getInstructions();

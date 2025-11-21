@@ -37,8 +37,6 @@ public class ExpressionGenerator {
         return null;
     }
 
-    // ==================== 初始化相关 ====================
-
     public Value visitInitVal(InitValNode node) {
         if (node != null && node.getType() == InitValNode.Type.SINGLE) {
             return visitExpression(node.getSingleInit());
@@ -47,14 +45,11 @@ public class ExpressionGenerator {
     }
 
     public Value visitConstInitVal(ConstInitValNode node) {
-        // 注意：常量初始化的运行时计算（如局部 const 数组初始化）也可能需要生成指令
         if (node != null && node.getType() == ConstInitValNode.Type.SINGLE) {
             return visitConstExp(node.getSingleInit());
         }
         return null;
     }
-
-    // ==================== 数值计算 ====================
 
     public Value visitConstExp(ConstExpNode node) {
         return node == null ? null : visitAddExp(node.getAddExp());

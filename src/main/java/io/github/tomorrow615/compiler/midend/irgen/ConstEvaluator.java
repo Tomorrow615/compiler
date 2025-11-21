@@ -65,7 +65,6 @@ public class ConstEvaluator {
             return calcAddExp(node.getExp().getAddExp());
         } else if (node.getType() == PrimaryExpNode.Type.LVAL) {
             LValNode lval = node.getLval();
-            // [关键] 使用 context 获取当前作用域进行查找
             Symbol sym = context.getCurrentScope().lookup(lval.getIdent().getText());
 
             if (sym instanceof ValueSymbol valSym && valSym.isConst()) {
@@ -74,7 +73,6 @@ public class ConstEvaluator {
                         return valSym.getConstValue();
                     }
                 } else {
-                    // 数组元素常量折叠
                     ExpNode indexExp = lval.getArrayExps().get(0);
                     int index = calcAddExp(indexExp.getAddExp());
 

@@ -8,7 +8,7 @@ import java.util.Collections;
 
 public class SymbolTable {
     private final SymbolTable parent;
-    private final int scopeId; // 当前作用域的ID
+    private final int scopeId;
     private final Map<String, Symbol> symbols = new HashMap<>();
     private final List<Symbol> orderedSymbols = new ArrayList<>();
 
