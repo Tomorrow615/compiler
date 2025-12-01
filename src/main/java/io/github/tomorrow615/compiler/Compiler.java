@@ -10,6 +10,8 @@ import io.github.tomorrow615.compiler.util.*;
 import io.github.tomorrow615.compiler.frontend.visitor.SemanticVisitor;
 import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
+import io.github.tomorrow615.compiler.backend.mips.*;
+import io.github.tomorrow615.compiler.backend.codegen.MipsGenerator;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -21,11 +23,15 @@ import java.util.List;
 public class Compiler {
     public static void main(String[] args) {
         String inputFile = "testfile.txt";
+        String outputFileError = "error.txt";
+
         String outputFileLexer = "lexer.txt";
         String outputFileParser = "parser.txt";
         String outputFileSymbol = "symbol.txt";
+
         String outputFileLlvmIr = "llvm_ir.txt";
-        String outputFileError = "error.txt";
+        String outputFileLlvmIrOpt = "llvm_ir2.txt";
+        String outputFileMips = "mips.txt";
 
         try {
             String sourceCode = new String(Files.readAllBytes(Paths.get(inputFile)));
@@ -49,12 +55,11 @@ public class Compiler {
             SemanticVisitor semanticVisitor = new SemanticVisitor();
             semanticVisitor.visit(compUnit);
             List<SymbolTable> allScopes = semanticVisitor.getAllScopes();
-
             try (SymbolRecorder symbolRecorder = new SymbolRecorder(outputFileSymbol)) {
                 symbolRecorder.recordAll(semanticVisitor.getAllScopes());
             }
 
-            // --- 步骤 4: 检查错误并输出 ---
+            // --- 步骤 4: 检查错误 并 输出 ---
             if (ErrorReporter.hasErrors()) {
                 try (BufferedWriter errorWriter = new BufferedWriter(new FileWriter(outputFileError))) {
                     for (Error error : ErrorReporter.getErrors()) {
@@ -62,16 +67,33 @@ public class Compiler {
                         errorWriter.newLine();
                     }
                 }
-            } else {
-                // --- 步骤 5: IR 生成 ---
-                IRGenerator irGenerator = new IRGenerator(compUnit, allScopes);
-                Module llvmModule = irGenerator.generate();
+                return;
+            }
 
-                // --- 步骤 6: 打印 LLVM IR ---
-                try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
+            // --- 步骤 5: 基础 IR 生成 和 输出 ---
+            IRGenerator irGenerator = new IRGenerator(compUnit, allScopes);
+            Module llvmModule = irGenerator.generate();
+            try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
+                irPrinter.print(llvmModule);
+            }
+
+            // --- 步骤 6: LLVM IR 优化 ---
+            if (Config.OPTIMIZE_LLVM) {
+                // TODO
+                try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIrOpt)) {
                     irPrinter.print(llvmModule);
                 }
             }
+
+            // --- 步骤 7 & 8: MIPS 生成 ---
+            if (Config.GENERATE_MIPS) {
+                MipsGenerator mipsGenerator = new MipsGenerator(llvmModule);
+                MipsModule mipsModule = mipsGenerator.generate();
+                try (MipsPrinter mipsPrinter = new MipsPrinter(outputFileMips)) {
+                    mipsPrinter.print(mipsModule);
+                }
+            }
+
         } catch (IOException e) {
             System.err.println("文件读写时发生错误: " + e.getMessage());
             e.printStackTrace();

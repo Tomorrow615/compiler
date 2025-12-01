@@ -11,6 +11,10 @@ public class ConstantString extends Constant {
         this.value = value;
     }
 
+    public String getContent() {
+        return value;
+    }
+
     @Override
     public String toString(SlotTracker tracker) {
         String llvmString = value.replace("\n", "\\0A") + "\\00";
@@ -19,6 +23,8 @@ public class ConstantString extends Constant {
 
     @Override
     public String toString() {
-        return "ConstantString<" + value + ">@" + hashCode();
+        // [强制修复] 返回 LLVM IR 标准格式，防止误用
+        String llvmString = value.replace("\n", "\\0A").replace("\0", "\\00");
+        return "c\"" + llvmString + "\"";
     }
 }
