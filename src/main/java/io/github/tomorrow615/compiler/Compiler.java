@@ -35,7 +35,7 @@ public class Compiler {
 
         try {
             String sourceCode = new String(Files.readAllBytes(Paths.get(inputFile)));
-            ErrorReporter.clearErrors(); // 清空上一轮的错误
+            ErrorReporter.clearErrors();
 
             // --- 步骤 1: 词法分析 ---
             List<Token> tokens;
