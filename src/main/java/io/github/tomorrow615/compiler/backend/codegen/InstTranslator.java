@@ -112,15 +112,6 @@ public class InstTranslator {
         loadValueToRegister(inst.getLhs(), MipsRegister.T0);
         loadValueToRegister(inst.getRhs(), MipsRegister.T1);
 
-        String op = switch (inst.getOp()) {
-            case ADD -> "addu";
-            case SUB -> "subu";
-            case MUL -> "mul";
-            case SDIV -> "div";
-            case SREM -> "div";
-            default -> "addu";
-        };
-
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV) {
             // div rs, rt
             currentMipsBlock.addInstruction(new MipsBinary("div", MipsRegister.T0, MipsRegister.T1));
@@ -131,8 +122,22 @@ public class InstTranslator {
             currentMipsBlock.addInstruction(new MipsBinary("div", MipsRegister.T0, MipsRegister.T1));
             // mfhi rd
             currentMipsBlock.addInstruction(new MipsBinary("mfhi", MipsRegister.T2));
+        } else if (inst.getOp() == BinaryOpInst.OpCode.SHL) {
+            // sllv rd, rs, rt (变量移位)
+            currentMipsBlock.addInstruction(new MipsBinary("sllv", MipsRegister.T2, MipsRegister.T0, MipsRegister.T1));
+        } else if (inst.getOp() == BinaryOpInst.OpCode.ASHR) {
+            // srav rd, rs, rt (算术右移)
+            currentMipsBlock.addInstruction(new MipsBinary("srav", MipsRegister.T2, MipsRegister.T0, MipsRegister.T1));
         } else {
-            // add, sub, mul
+            // add, sub, mul, and, or
+            String op = switch (inst.getOp()) {
+                case ADD -> "addu";
+                case SUB -> "subu";
+                case MUL -> "mul";
+                case AND -> "and";
+                case OR -> "or";
+                default -> "addu";
+            };
             currentMipsBlock.addInstruction(new MipsBinary(op, MipsRegister.T2, MipsRegister.T0, MipsRegister.T1));
         }
 

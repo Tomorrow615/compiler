@@ -46,6 +46,14 @@ public abstract class Value {
         this.users.remove(use);
     }
 
+    /**
+     * 获取所有使用此 Value 的 User 列表
+     * 用于优化分析（如死代码删除）
+     */
+    public List<Use> getUsers() {
+        return users;
+    }
+
     public abstract String toString(SlotTracker tracker);
 
     @Override

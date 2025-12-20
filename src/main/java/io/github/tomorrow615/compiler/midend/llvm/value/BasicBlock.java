@@ -10,11 +10,17 @@ import java.util.List;
 public class BasicBlock extends Value {
     private final List<Instruction> instructions;
     private final Function parentFunction;
+    
+    // CFG 关系：前驱和后继基本块
+    private final List<BasicBlock> predecessors;
+    private final List<BasicBlock> successors;
 
     public BasicBlock(String name, Function parentFunction) {
         super(LabelType.get(), name);
         this.parentFunction = parentFunction;
         this.instructions = new ArrayList<>();
+        this.predecessors = new ArrayList<>();
+        this.successors = new ArrayList<>();
         if (parentFunction != null) {
             parentFunction.addBasicBlock(this);
         }
@@ -30,6 +36,27 @@ public class BasicBlock extends Value {
 
     public void addInstruction(Instruction inst) {
         this.instructions.add(inst);
+    }
+
+    // === CFG 方法 ===
+    public List<BasicBlock> getPredecessors() {
+        return predecessors;
+    }
+
+    public List<BasicBlock> getSuccessors() {
+        return successors;
+    }
+
+    public void addPredecessor(BasicBlock bb) {
+        if (!predecessors.contains(bb)) {
+            predecessors.add(bb);
+        }
+    }
+
+    public void addSuccessor(BasicBlock bb) {
+        if (!successors.contains(bb)) {
+            successors.add(bb);
+        }
     }
 
     public boolean hasTerminator() {

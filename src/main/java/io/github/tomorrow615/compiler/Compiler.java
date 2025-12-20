@@ -12,6 +12,8 @@ import io.github.tomorrow615.compiler.frontend.symbol.SymbolTable;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 import io.github.tomorrow615.compiler.backend.mips.*;
 import io.github.tomorrow615.compiler.backend.codegen.MipsGenerator;
+import io.github.tomorrow615.compiler.midend.analysis.CFGBuilder;
+import io.github.tomorrow615.compiler.midend.optimize.*;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -79,7 +81,15 @@ public class Compiler {
 
             // --- 步骤 6: LLVM IR 优化 ---
             if (Config.OPTIMIZE_LLVM) {
-                // TODO
+                PassManager pm = new PassManager();
+                pm.addPass(new CFGBuilder());              // 构建 CFG（Mem2Reg 依赖）
+                pm.addPass(new Mem2Reg());                 // SSA 构造（消除冗余 load/store）
+                pm.addPass(new ConstantFolding());         // 常量折叠
+                pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
+                pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
+                pm.addPass(new DeadCodeElimination());     // 死代码删除（清理 Mem2Reg 产生的死 Phi）
+                pm.runOnModule(llvmModule);
+                
                 try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIrOpt)) {
                     irPrinter.print(llvmModule);
                 }

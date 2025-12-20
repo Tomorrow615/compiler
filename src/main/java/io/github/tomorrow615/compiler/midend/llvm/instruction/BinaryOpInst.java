@@ -12,7 +12,9 @@ public class BinaryOpInst extends Instruction {
         SDIV, // / (有符号除法)
         SREM, // % (有符号取余)
         AND,
-        OR
+        OR,
+        SHL,  // << (左移)
+        ASHR  // >> (算术右移，保留符号位)
     }
 
     private final OpCode op;
@@ -46,6 +48,8 @@ public class BinaryOpInst extends Instruction {
             case SREM -> "srem";
             case AND -> "and";
             case OR -> "or";
+            case SHL -> "shl";
+            case ASHR -> "ashr";
         };
         return tracker.getName(this) + " = " + opStr + " " + this.getType().toString()
                 + " " + tracker.getName(getLhs()) + ", " + tracker.getName(getRhs());
