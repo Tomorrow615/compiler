@@ -31,3 +31,5 @@ Thumbs.db
 
 # 确保忽略所有 txt (你原来已经有了，保持即可)
 *.txt
+
+*.class
