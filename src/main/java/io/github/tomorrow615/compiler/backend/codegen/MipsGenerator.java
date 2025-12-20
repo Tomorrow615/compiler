@@ -200,8 +200,13 @@ public class MipsGenerator {
             }
         }
 
-        // [修改] 4. 翻译函数体 (启用 InstTranslator)
-        InstTranslator translator = new InstTranslator(stackManager, mipsFunc);
-        translator.translate(func);
+        // [修改] 4. 翻译函数体 (根据优化等级选择翻译器)
+        if (io.github.tomorrow615.compiler.util.Config.MIPS_OPTIMIZATION_LEVEL >= 1) {
+            OptimizedInstTranslator translator = new OptimizedInstTranslator(stackManager, mipsFunc);
+            translator.translate(func);
+        } else {
+            InstTranslator translator = new InstTranslator(stackManager, mipsFunc);
+            translator.translate(func);
+        }
     }
 }

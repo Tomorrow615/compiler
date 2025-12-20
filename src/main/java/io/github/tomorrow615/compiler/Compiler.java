@@ -87,6 +87,7 @@ public class Compiler {
                 pm.addPass(new ConstantFolding());         // 常量折叠
                 pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
                 pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
+                pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除
                 pm.addPass(new DeadCodeElimination());     // 死代码删除（清理 Mem2Reg 产生的死 Phi）
                 pm.runOnModule(llvmModule);
                 
