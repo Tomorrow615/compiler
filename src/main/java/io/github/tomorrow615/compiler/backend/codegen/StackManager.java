@@ -37,10 +37,11 @@ public class StackManager {
 
     /**
      * 核心分析逻辑：遍历函数，分配空间
-     * 采用 Spill Everything 策略：为所有虚拟寄存器分配栈空间
      */
     private void analyze(Function function) {
         // 1. 扫描所有 Call 指令，确定 Outgoing Args 区域的大小
+        // MIPS 规范：必须为调用的子函数预留参数空间（即使 < 4个）
+        // 这里简化：只计算参数个数，每个预留 4 字节
         int maxCallArgs = 0;
         for (BasicBlock bb : function.getBasicBlocks()) {
             for (Instruction inst : bb.getInstructions()) {
@@ -51,9 +52,11 @@ public class StackManager {
         }
 
         // 基础偏移量从 Outgoing Args 之后开始
+        // 即使没有 call，MIPS 有时也建议保留 16 字节(4 args)，但 Phase 1 我们按需分配即可
         int currentOffset = maxCallArgs * 4;
 
         // 2. 为当前函数的参数 (Arguments) 分配空间
+        // 策略：虽然前4个在寄存器，但我们在 Prologue 会把它们存入栈，统一变成栈上变量处理
         for (Argument arg : function.getArguments()) {
             valueOffsetMap.put(arg, currentOffset);
             currentOffset += 4;
@@ -62,36 +65,44 @@ public class StackManager {
         // 3. 遍历所有指令，为有返回值的指令分配空间
         for (BasicBlock bb : function.getBasicBlocks()) {
             for (Instruction inst : bb.getInstructions()) {
-                // void 类型指令不需要分配空间
+                // void 类型指令不需要分配空间 (如 store, br, ret void, call void)
                 if (inst.getType().isVoidType()) {
                     continue;
                 }
 
                 // 计算需要的大小
-                int size = 4; // 默认 4 字节（适用于所有虚拟寄存器）
+                int size = 4; // 默认 4 字节
 
                 if (inst instanceof AllocaInst allocaInst) {
-                    // 特殊处理：Alloca 数组需要更大空间
+                    // 如果是 Alloca，也就是局部变量/数组定义
+                    // 需要根据分配的类型计算大小
+                    // 指针指向的类型 -> 获取该类型大小
+                    // 这里假设 Phase 1 只有 int 或 int 数组
+                    // PointerType -> TargetType
+                    // 你的 AllocaInst 存的是 allocatedType
                     var allocatedType = allocaInst.getAllocatedType();
                     if (allocatedType.isArrayType()) {
+                        // 数组大小：元素个数 * 4
+                        // 注意：这里需要你确认 ArrayType 有 getNumElements() 方法
+                        // 且 Phase 1 假设都是 int 数组
                         var arrayType = (io.github.tomorrow615.compiler.midend.llvm.type.ArrayType) allocatedType;
                         size = arrayType.getNumElements() * 4;
                     } else {
+                        // 普通 int 变量
                         size = 4;
                     }
                 }
-                // 其他所有指令（Add, Sub, Load, Move 等）统一 4 字节
 
                 valueOffsetMap.put(inst, currentOffset);
                 currentOffset += size;
             }
         }
 
-        // 4. 为 $ra 留一个位置
+        // 4. 最后为 $ra 留一个位置
         this.raOffset = currentOffset;
         currentOffset += 4;
 
-        // 5. 确定最终 FrameSize (保持 8 字节对齐)
+        // 5. 确定最终 FrameSize (保持 8 字节对齐是好习惯，虽然 Phase 1 不强求)
         this.frameSize = currentOffset;
         if (this.frameSize % 8 != 0) {
             this.frameSize += 4;
