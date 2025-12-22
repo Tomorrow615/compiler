@@ -370,11 +370,19 @@ public class OptimizedInstTranslator {
     }
 
     private void translateCall(CallInst inst) {
-        // 函数调用前，刷新所有 caller-saved 寄存器
-        invalidateCallerSavedRegisters();
-
         Function targetFunc = inst.getFunction();
         List<Value> args = inst.getArguments();
+        String funcLabel = targetFunc.getName().substring(1);
+
+        // [优化] 内联库函数调用
+        // 对于内联函数，不需要刷新寄存器缓存，因为 syscall 不会破坏 $t 寄存器
+        if (isInlineableLibFunction(funcLabel)) {
+            inlineLibFunction(funcLabel, inst);
+            return;
+        }
+
+        // 函数调用前，刷新所有 caller-saved 寄存器
+        invalidateCallerSavedRegisters();
 
         // 1. 准备参数
         for (int i = 0; i < args.size(); i++) {
@@ -390,7 +398,6 @@ public class OptimizedInstTranslator {
         }
 
         // 2. 跳转
-        String funcLabel = targetFunc.getName().substring(1);
         currentMipsBlock.addInstruction(new MipsBranch("jal", funcLabel));
 
         // 3. 处理返回值
@@ -400,6 +407,52 @@ public class OptimizedInstTranslator {
             currentMipsBlock.addInstruction(new MipsBinary(
                 "addu", MipsRegister.T2, MipsRegister.V0, MipsRegister.ZERO));
             cacheValueToRegister(inst, MipsRegister.T2);
+        }
+    }
+
+    /**
+     * 判断是否为可内联的库函数
+     */
+    private boolean isInlineableLibFunction(String funcName) {
+        return funcName.equals("getint") || funcName.equals("getch") ||
+               funcName.equals("putint") || funcName.equals("putch") ||
+               funcName.equals("putstr");
+    }
+
+    /**
+     * 内联库函数：直接生成 syscall 指令序列
+     */
+    private void inlineLibFunction(String funcName, CallInst inst) {
+        int syscallCode = switch (funcName) {
+            case "getint" -> 5;
+            case "getch" -> 12;
+            case "putint" -> 1;
+            case "putch" -> 11;
+            case "putstr" -> 4;
+            default -> throw new RuntimeException("Unknown lib function: " + funcName);
+        };
+
+        // 对于 putint/putch/putstr，需要加载参数到 $a0
+        if (funcName.equals("putint") || funcName.equals("putch") || funcName.equals("putstr")) {
+            List<Value> args = inst.getArguments();
+            if (!args.isEmpty()) {
+                // 加载第一个参数到 $a0
+                loadValueToRegister(args.get(0), MipsRegister.A0);
+            }
+        }
+
+        // 生成 syscall
+        currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, syscallCode));
+        currentMipsBlock.addInstruction(new MipsSyscall());
+
+        // 对于 getint/getch，返回值在 $v0，需要缓存
+        if (funcName.equals("getint") || funcName.equals("getch")) {
+            if (!inst.getType().isVoidType()) {
+                // 将 $v0 移动到 $t2 然后缓存
+                currentMipsBlock.addInstruction(new MipsBinary(
+                    "addu", MipsRegister.T2, MipsRegister.V0, MipsRegister.ZERO));
+                cacheValueToRegister(inst, MipsRegister.T2);
+            }
         }
     }
 

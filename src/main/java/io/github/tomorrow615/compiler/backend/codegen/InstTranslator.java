@@ -208,6 +208,13 @@ public class InstTranslator {
     private void translateCall(CallInst inst) {
         Function targetFunc = inst.getFunction();
         List<Value> args = inst.getArguments();
+        String funcLabel = targetFunc.getName().substring(1); // 去掉 @
+
+        // [优化] 内联库函数调用
+        if (isInlineableLibFunction(funcLabel)) {
+            inlineLibFunction(funcLabel, inst);
+            return;
+        }
 
         // 1. 准备参数
         for (int i = 0; i < args.size(); i++) {
@@ -229,20 +236,56 @@ public class InstTranslator {
         }
 
         // 2. 生成跳转指令: jal func_name
-        String funcLabel = targetFunc.getName().substring(1); // 去掉 @
-        // SysY 库函数名兼容 (getint, putint 等)
-        if (funcLabel.equals("getint") || funcLabel.equals("putint") ||
-                funcLabel.equals("putch") || funcLabel.equals("putstr")) {
-            // 库函数不需要特殊处理，直接 jal 名字即可，但在链接时需注意
-            // 这里假设生成的汇编最后会和库函数代码拼在一起，或者模拟器支持
-        }
-
         currentMipsBlock.addInstruction(new MipsBranch("jal", funcLabel));
 
         // 3. 处理返回值
         if (!inst.getType().isVoidType()) {
             // 返回值在 $v0，存回栈上分配给 CallInst 的位置
             saveRegisterToStack(MipsRegister.V0, inst);
+        }
+    }
+
+    /**
+     * 判断是否为可内联的库函数
+     */
+    private boolean isInlineableLibFunction(String funcName) {
+        return funcName.equals("getint") || funcName.equals("getch") ||
+               funcName.equals("putint") || funcName.equals("putch") ||
+               funcName.equals("putstr");
+    }
+
+    /**
+     * 内联库函数：直接生成 syscall 指令序列
+     */
+    private void inlineLibFunction(String funcName, CallInst inst) {
+        int syscallCode = switch (funcName) {
+            case "getint" -> 5;
+            case "getch" -> 12;
+            case "putint" -> 1;
+            case "putch" -> 11;
+            case "putstr" -> 4;
+            default -> throw new RuntimeException("Unknown lib function: " + funcName);
+        };
+
+        // 对于 putint/putch/putstr，参数已经在 $a0 中（由调用者准备）
+        // 只需要生成 syscall
+        if (funcName.equals("putint") || funcName.equals("putch") || funcName.equals("putstr")) {
+            List<Value> args = inst.getArguments();
+            if (!args.isEmpty()) {
+                // 加载第一个参数到 $a0
+                loadValueToRegister(args.get(0), MipsRegister.A0);
+            }
+        }
+
+        // 生成 syscall
+        currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, syscallCode));
+        currentMipsBlock.addInstruction(new MipsSyscall());
+
+        // 对于 getint/getch，返回值在 $v0，需要保存
+        if (funcName.equals("getint") || funcName.equals("getch")) {
+            if (!inst.getType().isVoidType()) {
+                saveRegisterToStack(MipsRegister.V0, inst);
+            }
         }
     }
 
