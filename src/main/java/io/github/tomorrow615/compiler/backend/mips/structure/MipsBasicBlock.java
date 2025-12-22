@@ -21,11 +21,21 @@ public class MipsBasicBlock {
         return label;
     }
 
+    public List<MipsInstruction> getInstructions() {
+        return instructions;
+    }
+
     @Override
     public String toString() {
+        return toString(true);
+    }
+
+    public String toString(boolean needLabel) {
         StringBuilder sb = new StringBuilder();
-        // 输出标签，例如 "main_entry:"
-        sb.append(label).append(":\n");
+        // 只有需要标签时才输出
+        if (needLabel) {
+            sb.append(label).append(":\n");
+        }
         // 输出所有指令
         for (MipsInstruction inst : instructions) {
             sb.append("\t").append(inst.toString()).append("\n");

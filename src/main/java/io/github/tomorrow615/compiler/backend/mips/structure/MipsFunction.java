@@ -20,6 +20,10 @@ public class MipsFunction {
         return name;
     }
 
+    public List<MipsBasicBlock> getBlocks() {
+        return blocks;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();

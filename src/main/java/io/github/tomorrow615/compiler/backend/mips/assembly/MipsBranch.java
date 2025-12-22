@@ -41,6 +41,10 @@ public class MipsBranch extends MipsInstruction {
         this.label = label;
     }
 
+    public String getLabel() {
+        return label;
+    }
+
     @Override
     public String toString() {
         if (label != null) {
