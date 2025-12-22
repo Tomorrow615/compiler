@@ -33,3 +33,8 @@ Thumbs.db
 *.txt
 
 *.class
+
+*.py
+*.jar
+*.asm
+*.bat

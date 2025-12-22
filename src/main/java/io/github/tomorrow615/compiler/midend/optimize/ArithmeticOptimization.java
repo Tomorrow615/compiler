@@ -136,79 +136,8 @@ public class ArithmeticOptimization implements Pass {
                 yield result;
             }
             case SREM -> {
-                // x % 2^k 的正确实现
-                // 算法：result = x - (x / 2^k) * 2^k
-                // 即：result = x - ((x + ((x >> 31) & (2^k - 1))) >> k << k)
-                
-                if (k == 0) {
-                    // x % 1 = 0，已在 AlgebraicSimplification 处理
-                    yield null;
-                }
-                
-                List<Instruction> result = new ArrayList<>();
-                
-                // 复用除法逻辑
-                // t1 = x >> 31
-                Instruction t1 = new BinaryOpInst(
-                    BinaryOpInst.OpCode.ASHR,
-                    lhs,
-                    new ConstantInt(31),
-                    bin.getName() + "_sign",
-                    null
-                );
-                result.add(t1);
-                
-                // t2 = t1 & (2^k - 1)
-                Instruction t2 = new BinaryOpInst(
-                    BinaryOpInst.OpCode.AND,
-                    t1,
-                    new ConstantInt((1 << k) - 1),
-                    bin.getName() + "_mask",
-                    null
-                );
-                result.add(t2);
-                
-                // t3 = x + t2
-                Instruction t3 = new BinaryOpInst(
-                    BinaryOpInst.OpCode.ADD,
-                    lhs,
-                    t2,
-                    bin.getName() + "_adj",
-                    null
-                );
-                result.add(t3);
-                
-                // t4 = t3 >> k (除法结果)
-                Instruction t4 = new BinaryOpInst(
-                    BinaryOpInst.OpCode.ASHR,
-                    t3,
-                    new ConstantInt(k),
-                    bin.getName() + "_div",
-                    null
-                );
-                result.add(t4);
-                
-                // t5 = t4 << k (乘回来)
-                Instruction t5 = new BinaryOpInst(
-                    BinaryOpInst.OpCode.SHL,
-                    t4,
-                    new ConstantInt(k),
-                    bin.getName() + "_mul",
-                    null
-                );
-                result.add(t5);
-                
-                // final = x - t5 (取余数)
-                Instruction finalResult = new BinaryOpInst(
-                    BinaryOpInst.OpCode.SUB,
-                    lhs,
-                    t5,
-                    bin.getName(),
-                    null
-                );
-                result.add(finalResult);
-                
-                yield result;
+                // 取模优化暂不处理（生成指令数多，可能不划算）
+                yield null;
             }
             default -> null;
         };
