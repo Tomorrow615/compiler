@@ -81,12 +81,17 @@ public class Compiler {
             // --- 步骤 6: LLVM IR 优化 ---
             if (Config.OPTIMIZE_LLVM) {
                 PassManager pm = new PassManager();
-                // 低风险优化 Pass（Mem2Reg 已移除）
-                pm.addPass(new ConstantFolding());         // 常量折叠
+                
+                // === 阶段一：SSA 构建（核心变革）===
+                pm.addPass(new Mem2Reg());  // 内存到寄存器提升，消除 alloca/load/store
+                
+                // === 阶段二：基于 SSA 的优化（红利期）===
+                pm.addPass(new ConstantFolding());         // 常量折叠（效果增强）
                 pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
                 pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
-                pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除
-                pm.addPass(new DeadCodeElimination());     // 死代码删除
+                pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除（效果增强）
+                pm.addPass(new DeadCodeElimination());     // 死代码删除（效果增强）
+                
                 pm.runOnModule(llvmModule);
                 
                 try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIrOpt)) {

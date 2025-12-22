@@ -64,8 +64,10 @@ public class InstTranslator {
         } else if (inst instanceof BranchInst br) {
             translateBranch(br);
         } else if (inst instanceof PhiInst) {
-            // Phi 指令本身不生成代码
-            // 它的逻辑在跳转指令发生前，由前驱块负责 Copy
+            // Phi 指令在 PhiElimination Pass 后应该已被删除
+            // 如果还存在，说明 PhiElimination 没有运行，这里不生成代码
+        } else if (inst instanceof MoveInst move) { // [新增] SSA 支持
+            translateMove(move);
         } else if (inst instanceof CallInst call) { // [新增]
             translateCall(call);
         } else if (inst instanceof GetElementPtrInst gep) { // [新增]
@@ -345,6 +347,14 @@ public class InstTranslator {
             // 存入结果
             saveRegisterToStack(MipsRegister.T2, inst);
         }
+    }
+
+    // === 新增：Move 指令翻译（SSA 支持）===
+    private void translateMove(MoveInst inst) {
+        // Move 指令：dest = move src
+        // 将源值加载到寄存器，然后存储到目标位置
+        loadValueToRegister(inst.getSource(), MipsRegister.T0);
+        saveRegisterToStack(MipsRegister.T0, inst);
     }
 
     // 处理 Zext (零扩展) 和 Trunc (截断)

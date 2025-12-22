@@ -54,6 +54,18 @@ public abstract class Value {
         return users;
     }
 
+    /**
+     * 将该 Value 的所有使用替换为另一个 Value
+     * 用于优化（如 Mem2Reg、CSE 等）
+     */
+    public void replaceAllUsesWith(Value newValue) {
+        // 复制 users 列表防止迭代时修改
+        List<Use> usersCopy = new ArrayList<>(this.users);
+        for (Use use : usersCopy) {
+            use.setValue(newValue);
+        }
+    }
+
     public abstract String toString(SlotTracker tracker);
 
     @Override
