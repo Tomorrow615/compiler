@@ -81,18 +81,24 @@ public class Compiler {
             // --- 步骤 6: LLVM IR 优化 ---
             if (Config.OPTIMIZE_LLVM) {
                 PassManager pm = new PassManager();
-                // 数组标量化 - 必须在 Mem2Reg 之前
-                pm.addPass(new SROA_Simple());             // 拆分小数组 -> 多个 i32
-                // SSA 构造 (Mem2Reg) - 提升标量到寄存器
-                pm.addPass(new Mem2Reg());                   // alloca -> phi
-                pm.addPass(new SimplifyCFG());             // CFG 简化 (合并基本块，删除不可达块)
-                // 低风险优化 Pass
-                pm.addPass(new ConstantFolding());         // 常量折叠
-                pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
-                pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
-                pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除
-                pm.addPass(new DeadCodeElimination());     // 死代码删除
-                pm.addPass(new SimplifyCFG());             // 再次清理 CFG (DCE 可能产生新的空块)
+                // === 内存优化前置准备 ===
+                pm.addPass(new SROA_Simple());             // 1. 拆解数组
+                pm.addPass(new Global2Local());            // 2. 全局变量本地化
+                
+                // === 核心 SSA 构造 ===
+                pm.addPass(new Mem2Reg());                 // 3. 提升到寄存器
+                pm.addPass(new SimplifyCFG());             // 4. CFG 简化（含分支折叠）
+                
+                // === 迭代优化 ===
+                pm.addPass(new ConstantFolding());         // 5. 常量折叠
+                pm.addPass(new DeadCodeElimination());     // 6. 死代码消除
+                pm.addPass(new AlgebraicSimplification()); // 7. 代数简化
+                pm.addPass(new ArithmeticOptimization());  // 8. 乘除优化
+                pm.addPass(new CommonSubexprElimination()); // 9. CSE
+                
+                // === 最终清理 ===
+                pm.addPass(new SimplifyCFG());             // 10. 再次 CFG 清理
+                pm.addPass(new DeadCodeElimination());     // 11. 最终死代码清理
                 pm.runOnModule(llvmModule);
                 
                 // Mem2Reg 后重新编号所有 SSA 值，修复 IR 乱码

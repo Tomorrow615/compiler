@@ -50,4 +50,27 @@ public class BranchInst extends Instruction {
     public String toString() {
         return "BranchInst<" + (isConditional() ? "cond" : "uncond") + ">@" + hashCode();
     }
+
+    // === 辅助方法（用于常量分支折叠优化）===
+
+    public Value getCondition() {
+        if (!isConditional()) {
+            throw new IllegalStateException("Unconditional branch has no condition");
+        }
+        return getOperand(0);
+    }
+
+    public BasicBlock getTrueBlock() {
+        if (!isConditional()) {
+            throw new IllegalStateException("Unconditional branch has no true block");
+        }
+        return (BasicBlock) getOperand(1);
+    }
+
+    public BasicBlock getFalseBlock() {
+        if (!isConditional()) {
+            throw new IllegalStateException("Unconditional branch has no false block");
+        }
+        return (BasicBlock) getOperand(2);
+    }
 }

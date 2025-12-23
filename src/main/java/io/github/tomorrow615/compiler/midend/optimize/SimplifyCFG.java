@@ -5,10 +5,10 @@ import io.github.tomorrow615.compiler.midend.llvm.value.*;
 import java.util.*;
 
 /**
- * 控制流图简化 Pass
- * 1. 删除不可达的基本块
- * 2. 合并线性连接的基本块 (A -> B, A只有B一个后继，B只有A一个前驱)
- * 这对于减少 JUMP/BRANCH 指令 (Cost=2) 至关重要
+ * 控制流图简化 Pass (增强版)
+ * 1. 常量分支折叠 (br i1 true -> br label)
+ * 2. 删除不可达的基本块
+ * 3. 合并线性连接的基本块
  */
 public class SimplifyCFG implements Pass {
 
@@ -22,11 +22,58 @@ public class SimplifyCFG implements Pass {
         boolean changed = true;
         while (changed) {
             changed = false;
-            // 1. 删除不可达块
+            // 1. 常量分支折叠 (必须在前，切断不可达块的边)
+            changed |= foldBranchToJump(function);
+            // 2. 删除不可达块
             changed |= removeUnreachableBlocks(function);
-            // 2. 合并基本块
+            // 3. 合并基本块
             changed |= mergeBlocks(function);
         }
+    }
+
+    /**
+     * 常量分支折叠：将条件为常量的 Branch 转化为无条件跳转
+     */
+    private boolean foldBranchToJump(Function function) {
+        boolean changed = false;
+        for (BasicBlock bb : function.getBasicBlocks()) {
+            if (bb.getInstructions().isEmpty()) continue;
+            Instruction terminator = bb.getInstructions().get(bb.getInstructions().size() - 1);
+
+            if (terminator instanceof BranchInst br && br.isConditional()) {
+                Value cond = br.getCondition();
+                if (cond instanceof ConstantInt constCond) {
+                    // 确定跳转的目标
+                    BasicBlock dest = constCond.getValue() != 0 ? br.getTrueBlock() : br.getFalseBlock();
+                    BasicBlock deadDest = constCond.getValue() != 0 ? br.getFalseBlock() : br.getTrueBlock();
+
+                    // 【特殊情况处理】如果 dest 和 deadDest 是同一个块 (br i1 true, label %A, label %A)
+                    // 这种情况 Phi 节点处理比较复杂，且收益不高，跳过
+                    if (dest == deadDest) continue;
+
+                    // 1. 清理被放弃分支的 Phi 节点
+                    cleanPhiNodes(deadDest, bb);
+
+                    // 2. 【关键修复】维护 CFG：从 deadDest 的前驱列表中移除当前块 bb
+                    deadDest.getPredecessors().remove(bb);
+
+                    // 3. 创建新的无条件跳转
+                    BranchInst newBr = new BranchInst(dest, null);
+                    newBr.setParentBlock(bb);
+                    
+                    // 4. 移除旧指令引用并替换
+                    br.removeUseFromOperands();
+                    bb.getInstructions().set(bb.getInstructions().size() - 1, newBr);
+                    
+                    // 5. 更新当前块的后继列表
+                    bb.getSuccessors().clear();
+                    bb.addSuccessor(dest);
+                    
+                    changed = true;
+                }
+            }
+        }
+        return changed;
     }
 
     private boolean removeUnreachableBlocks(Function function) {
@@ -58,11 +105,9 @@ public class SimplifyCFG implements Pass {
         
         if (toRemove.isEmpty()) return false;
         
-        // 清理前驱后继关系
         for (BasicBlock bb : toRemove) {
             for (BasicBlock succ : bb.getSuccessors()) {
                 succ.getPredecessors().remove(bb);
-                // 如果后继有 Phi 节点，需要移除对应的 incoming
                 cleanPhiNodes(succ, bb);
             }
         }
@@ -72,16 +117,11 @@ public class SimplifyCFG implements Pass {
 
     private boolean mergeBlocks(Function function) {
         boolean changed = false;
-        // 使用新列表避免迭代时修改
         List<BasicBlock> blocks = new ArrayList<>(function.getBasicBlocks());
         
         for (BasicBlock bb : blocks) {
-            // 跳过已删除的块
             if (!function.getBasicBlocks().contains(bb)) continue;
             
-            // 检查是否可以合并后继
-            // 条件：bb 有且仅有一个后继 succ，且 succ 有且仅有一个前驱 bb
-            // 注意：succ 不能是 entry (虽然一般不会发生)
             if (bb.getSuccessors().size() == 1) {
                 BasicBlock succ = bb.getSuccessors().get(0);
                 if (succ != function.getBasicBlocks().get(0) && 
@@ -96,43 +136,37 @@ public class SimplifyCFG implements Pass {
     }
 
     private void doMerge(BasicBlock bb, BasicBlock succ, Function function) {
-        // 1. 移除 bb 末尾的跳转指令
         Instruction terminator = bb.getInstructions().get(bb.getInstructions().size() - 1);
-        terminator.removeUseFromOperands(); // 断开对 succ 的引用
+        terminator.removeUseFromOperands();
         bb.getInstructions().remove(bb.getInstructions().size() - 1);
         
-        // 2. 将 succ 的所有指令移动到 bb 末尾
         for (Instruction inst : succ.getInstructions()) {
             inst.setParentBlock(bb);
             bb.getInstructions().add(inst);
         }
         
-        // 3. 更新 succ 的后继的前驱指向
-        // 原来是 succ -> next，现在变成 bb -> next
         for (BasicBlock next : succ.getSuccessors()) {
-            // 更新 CFG 链表
             next.getPredecessors().remove(succ);
             next.getPredecessors().add(bb);
-            // 更新 Phi 节点中的引用
             replacePhiPredecessor(next, succ, bb);
         }
         
-        // 4. 更新 bb 的后继列表
         bb.getSuccessors().clear();
         bb.getSuccessors().addAll(succ.getSuccessors());
-        
-        // 5. 从函数中移除 succ
         function.getBasicBlocks().remove(succ);
     }
     
+    /**
+     * 【修复】清理 Phi 节点，移除指定前驱的 incoming
+     */
     private void cleanPhiNodes(BasicBlock bb, BasicBlock predToRemove) {
         for (Instruction inst : bb.getInstructions()) {
             if (inst instanceof PhiInst phi) {
-                // 找到 predToRemove 对应的操作数索引
                 for (int i = 0; i < phi.getOperands().size(); i += 2) {
                     if (phi.getOperand(i + 1) == predToRemove) {
                         phi.getOperands().remove(i + 1); // 移除 Block
                         phi.getOperands().remove(i);     // 移除 Value
+                        // 标准 LLVM 中一个前驱在 Phi 中只出现一次
                         break;
                     }
                 }

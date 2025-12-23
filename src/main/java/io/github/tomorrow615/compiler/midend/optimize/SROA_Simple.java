@@ -62,6 +62,7 @@ public class SROA_Simple implements Pass {
         }
 
         // 5. 检查所有用途：必须是 GEP 指令，且下标必须是常数
+        // 【关键修复】同时检查数组是否逃逸（被传递给函数、被其他指令使用等）
         List<GetElementPtrInst> geps = new ArrayList<>();
         for (Use use : alloca.getUsers()) {
             User user = use.getUser();
@@ -85,9 +86,19 @@ public class SROA_Simple implements Pass {
                     return;
                 }
                 
+                // 【关键修复】检查 GEP 的使用者，只能是 Load/Store
+                for (Use gepUse : gep.getUsers()) {
+                    User gepUser = gepUse.getUser();
+                    if (!(gepUser instanceof LoadInst || gepUser instanceof StoreInst)) {
+                        // GEP 被用于其他目的（如传递给函数），数组逃逸了
+                        return;
+                    }
+                }
+                
                 geps.add(gep);
             } else {
-                // 有其他用途（如作为函数参数），不能拆解
+                // 【关键修复】alloca 直接被使用（不通过 GEP）
+                // 这通常意味着数组作为指针被传递给了函数，禁止拆分！
                 return;
             }
         }
