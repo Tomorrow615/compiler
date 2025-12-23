@@ -40,4 +40,15 @@ public abstract class User extends Value {
         }
         this.operands.get(index).setValue(value);
     }
+
+    /**
+     * 断开此 User 与所有操作数的引用关系
+     * 用于删除指令时清理 Use-Def 链
+     */
+    public void removeUseFromOperands() {
+        for (Use use : operands) {
+            use.setValue(null); // 触发 Use.setValue，自动从 Value 的 users 列表中移除
+        }
+        operands.clear();
+    }
 }

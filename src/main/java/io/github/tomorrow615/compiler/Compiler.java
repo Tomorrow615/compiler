@@ -83,12 +83,14 @@ public class Compiler {
                 PassManager pm = new PassManager();
                 // SSA 构造 (Mem2Reg) - 必须第一个运行
                 pm.addPass(new Mem2Reg());                   // alloca -> phi
+                pm.addPass(new SimplifyCFG());             // CFG 简化 (合并基本块，删除不可达块)
                 // 低风险优化 Pass
                 pm.addPass(new ConstantFolding());         // 常量折叠
                 pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
                 pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
                 pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除
                 pm.addPass(new DeadCodeElimination());     // 死代码删除
+                pm.addPass(new SimplifyCFG());             // 再次清理 CFG (DCE 可能产生新的空块)
                 pm.runOnModule(llvmModule);
                 
                 // Mem2Reg 后重新编号所有 SSA 值，修复 IR 乱码

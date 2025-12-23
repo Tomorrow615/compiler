@@ -63,6 +63,9 @@ public class Mem2Reg implements Pass {
 
         // 5. 清理：删除已提升的 alloca, load, store
         cleanup(func, promotableAllocas);
+
+        // 6. 清理冗余的 Phi 节点
+        removeTrivialPhis(func);
     }
 
     // ========== Step 1: 收集可提升的 alloca ==========
@@ -330,6 +333,54 @@ public class Mem2Reg implements Pass {
         // 从各块中移除
         for (BasicBlock bb : func.getBasicBlocks()) {
             bb.getInstructions().removeAll(toRemove);
+        }
+    }
+
+    // ========== Step 6: 清理冗余 Phi 节点 ==========
+
+    /**
+     * 移除冗余的 Phi 节点
+     * 冗余的情况包括：
+     * 1. phi [x, BB1], [x, BB2] ... - 所有输入都是同一个值
+     * 2. phi [x, BB1] - 只有一个输入
+     * 3. phi [phi, BB1], [x, BB2] - 包含自引用，但实际值只有一个
+     */
+    private void removeTrivialPhis(Function func) {
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+            for (BasicBlock bb : func.getBasicBlocks()) {
+                List<Instruction> toRemove = new ArrayList<>();
+                for (Instruction inst : bb.getInstructions()) {
+                    if (inst instanceof PhiInst phi) {
+                        Value common = null;
+                        boolean isTrivial = true;
+                        
+                        // 检查所有输入值
+                        for (int i = 0; i < phi.getOperands().size(); i += 2) {
+                            Value val = phi.getOperand(i);
+                            // 跳过自引用的情况 (phi = phi)
+                            if (val == phi) continue;
+                            if (common == null) {
+                                common = val;
+                            } else if (common != val) {
+                                isTrivial = false;
+                                break;
+                            }
+                        }
+                        
+                        // 如果所有输入都相同（或者只有自引用），则替换
+                        if (isTrivial && common != null) {
+                            replaceAllUsesWith(phi, common);
+                            toRemove.add(phi);
+                            changed = true;
+                        }
+                    } else {
+                        break; // Phi 都在块开头
+                    }
+                }
+                bb.getInstructions().removeAll(toRemove);
+            }
         }
     }
 }
