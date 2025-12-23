@@ -81,13 +81,18 @@ public class Compiler {
             // --- 步骤 6: LLVM IR 优化 ---
             if (Config.OPTIMIZE_LLVM) {
                 PassManager pm = new PassManager();
-                // 低风险优化 Pass（Mem2Reg 已移除）
+                // SSA 构造 (Mem2Reg) - 必须第一个运行
+                pm.addPass(new Mem2Reg());                   // alloca -> phi
+                // 低风险优化 Pass
                 pm.addPass(new ConstantFolding());         // 常量折叠
                 pm.addPass(new AlgebraicSimplification()); // 代数简化 (x+0, x*1 等)
                 pm.addPass(new ArithmeticOptimization());  // 乘除法优化 (x*2^k -> x<<k)
                 pm.addPass(new CommonSubexprElimination()); // 公共子表达式消除
                 pm.addPass(new DeadCodeElimination());     // 死代码删除
                 pm.runOnModule(llvmModule);
+                
+                // Mem2Reg 后重新编号所有 SSA 值，修复 IR 乱码
+                renumberValues(llvmModule);
                 
                 try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIrOpt)) {
                     irPrinter.print(llvmModule);
@@ -106,6 +111,42 @@ public class Compiler {
         } catch (IOException e) {
             System.err.println("文件读写时发生错误: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    /**
+     * 为所有无名的 SSA 值分配编号 (修复 Mem2Reg 后的 IR 乱码)
+     */
+    private static void renumberValues(Module module) {
+        for (io.github.tomorrow615.compiler.midend.llvm.value.Function func : module.getFunctions()) {
+            if (func.isDeclaration()) continue;
+            
+            int counter = 0;
+            
+            // 1. 给参数编号 (强制编号，防止漏网之鱼)
+            for (io.github.tomorrow615.compiler.midend.llvm.value.Argument arg : func.getArguments()) {
+                arg.setName(String.valueOf(counter++));
+            }
+            
+            // 2. 给基本块和指令编号
+            for (io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock bb : func.getBasicBlocks()) {
+                // 给基本块编号 (防止 label 名字冲突)
+                String bbName = bb.getName();
+                if (bbName == null || bbName.isEmpty() || bbName.startsWith("<??")) {
+                    bb.setName("label_" + counter++);
+                }
+                
+                for (io.github.tomorrow615.compiler.midend.llvm.instruction.Instruction inst : bb.getInstructions()) {
+                    // 只有有返回值的指令才需要名字
+                    if (!inst.getType().isVoidType()) {
+                        String instName = inst.getName();
+                        // 只要名字不对劲，就重命名
+                        if (instName == null || instName.isEmpty() || instName.startsWith("<??")) {
+                            inst.setName(String.valueOf(counter++));
+                        }
+                    }
+                }
+            }
         }
     }
 }

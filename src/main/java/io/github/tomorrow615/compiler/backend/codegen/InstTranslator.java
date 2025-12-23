@@ -225,13 +225,9 @@ public class InstTranslator {
                 MipsRegister argReg = MipsRegister.values()[MipsRegister.A0.getId() + i];
                 loadValueToRegister(arg, argReg);
             } else {
-                // 后续参数：存入栈底预留区域 (Outgoing Args)
-                // 此时 $sp 指向当前函数的栈底，Outgoing Args 区域就在 0($sp), 4($sp)...
-                // 先加载到临时寄存器 $t0
+                // 超过4个的参数通过栈传递，偏移从0开始 (第5个参数在偏移0)
                 loadValueToRegister(arg, MipsRegister.T0);
-                // 再存入栈: sw $t0, offset($sp)
-                // 偏移量 = i * 4
-                currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, i * 4));
+                currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, (i - 4) * 4));
             }
         }
 

@@ -190,7 +190,9 @@ public class MipsGenerator {
                 MipsRegister argReg = MipsRegister.values()[MipsRegister.A0.getId() + i];
                 entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, argReg, MipsRegister.SP, offset));
             } else {
-                int callerOffset = frameSize + (i * 4);
+                // 超过4个的参数由调用者存放在调用者栈帧的 (i-4)*4 偏移处
+                // 被调用者需要从 frameSize + (i-4)*4 处读取 (因为 SP 已经下移了 frameSize)
+                int callerOffset = frameSize + (i - 4) * 4;
 
                 // 1. 从栈中取出参数值 -> $t0
                 entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, MipsRegister.T0, MipsRegister.SP, callerOffset));
@@ -198,6 +200,15 @@ public class MipsGenerator {
                 // 2. 存入当前栈帧分配的局部变量位置 -> offset($sp)
                 entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, offset));
             }
+        }
+
+        // 3.4 跳转到函数体的第一个基本块
+        // OptimizedInstTranslator 会从 LLVM 的 entry 块开始创建 MIPS 块
+        // 我们需要从 Prologue 跳转过去
+        if (!func.getBasicBlocks().isEmpty()) {
+            BasicBlock firstLLVMBlock = func.getBasicBlocks().get(0);
+            String firstBlockLabel = funcName + "_" + firstLLVMBlock.getName();
+            entryBlock.addInstruction(new MipsBranch("j", firstBlockLabel));
         }
 
         // [修改] 4. 翻译函数体 (根据优化等级选择翻译器)

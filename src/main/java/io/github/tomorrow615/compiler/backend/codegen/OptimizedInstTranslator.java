@@ -67,7 +67,15 @@ public class OptimizedInstTranslator {
      * 翻译整个函数的入口
      */
     public void translate(Function llvmFunction) {
+        // 计算可达块 (从 Entry 开始 BFS)
+        Set<BasicBlock> reachableBlocks = computeReachableBlocks(llvmFunction);
+
         for (BasicBlock llvmBB : llvmFunction.getBasicBlocks()) {
+            // 跳过不可达块 (Mem2Reg 可能产生悬空引用)
+            if (!reachableBlocks.contains(llvmBB)) {
+                continue;
+            }
+
             this.currentLLVMBlock = llvmBB;
 
             // 1. 创建对应的 MipsBasicBlock
@@ -88,6 +96,32 @@ public class OptimizedInstTranslator {
             // 4. 块结束前刷新所有 dirty 寄存器
             // 注意：分支指令已经在 translateBranch 中处理了
         }
+    }
+
+    /**
+     * 计算从入口块可达的所有基本块 (BFS)
+     */
+    private Set<BasicBlock> computeReachableBlocks(Function func) {
+        Set<BasicBlock> reachable = new HashSet<>();
+        if (func.getBasicBlocks().isEmpty()) {
+            return reachable;
+        }
+
+        Queue<BasicBlock> worklist = new LinkedList<>();
+        BasicBlock entry = func.getBasicBlocks().get(0);
+        worklist.add(entry);
+        reachable.add(entry);
+
+        while (!worklist.isEmpty()) {
+            BasicBlock current = worklist.poll();
+            for (BasicBlock succ : current.getSuccessors()) {
+                if (!reachable.contains(succ)) {
+                    reachable.add(succ);
+                    worklist.add(succ);
+                }
+            }
+        }
+        return reachable;
     }
 
     /**
@@ -354,19 +388,106 @@ public class OptimizedInstTranslator {
             String trueLabel = makeLabel(trueTarget);
             String falseLabel = makeLabel(falseTarget);
 
-            // Phi 节点处理
-            processPhiNodes(trueTarget);
-            processPhiNodes(falseTarget);
+            // 检测是否需要关键边分割
+            // 条件：目标块有 Phi 节点 && 目标块有多个前驱 (这是关键边的定义)
+            boolean trueNeedsPhiWork = hasPhiFromCurrentBlock(trueTarget);
+            boolean falseNeedsPhiWork = hasPhiFromCurrentBlock(falseTarget);
 
-            loadValueToRegister(inst.getOperand(0), MipsRegister.T0);
-            currentMipsBlock.addInstruction(new MipsBranch("bnez", MipsRegister.T0, trueLabel));
-            currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+            if (trueNeedsPhiWork || falseNeedsPhiWork) {
+                // 策略：为有 Phi 工作的分支创建"跳板块"(Trampoline Block)
+                // 这样每个路径的 Phi 处理代码只有在走该路径时才执行
+
+                // 加载条件
+                loadValueToRegister(inst.getOperand(0), MipsRegister.T0);
+
+                if (trueNeedsPhiWork && falseNeedsPhiWork) {
+                    // 两个分支都有 Phi 工作，需要创建两个跳板块
+                    String trueTrampolineLabel = makeLabel(currentLLVMBlock) + "_to_" + trueTarget.getName();
+                    String falseTrampolineLabel = makeLabel(currentLLVMBlock) + "_to_" + falseTarget.getName();
+
+                    // 条件跳转到 true 跳板块
+                    currentMipsBlock.addInstruction(new MipsBranch("bnez", MipsRegister.T0, trueTrampolineLabel));
+                    // 无条件跳转到 false 跳板块
+                    currentMipsBlock.addInstruction(new MipsBranch("j", falseTrampolineLabel));
+
+                    // 创建 true 跳板块
+                    MipsBasicBlock trueTrampolineBlock = new MipsBasicBlock(trueTrampolineLabel);
+                    mipsFunction.addBasicBlock(trueTrampolineBlock);
+                    MipsBasicBlock savedBlock = currentMipsBlock;
+                    currentMipsBlock = trueTrampolineBlock;
+                    processPhiNodes(trueTarget);
+                    currentMipsBlock.addInstruction(new MipsBranch("j", trueLabel));
+
+                    // 创建 false 跳板块
+                    MipsBasicBlock falseTrampolineBlock = new MipsBasicBlock(falseTrampolineLabel);
+                    mipsFunction.addBasicBlock(falseTrampolineBlock);
+                    currentMipsBlock = falseTrampolineBlock;
+                    processPhiNodes(falseTarget);
+                    currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+
+                    // 恢复 currentMipsBlock
+                    currentMipsBlock = savedBlock;
+
+                } else if (trueNeedsPhiWork) {
+                    // 只有 true 分支有 Phi
+                    String trueTrampolineLabel = makeLabel(currentLLVMBlock) + "_to_" + trueTarget.getName();
+
+                    currentMipsBlock.addInstruction(new MipsBranch("bnez", MipsRegister.T0, trueTrampolineLabel));
+                    currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+
+                    MipsBasicBlock trueTrampolineBlock = new MipsBasicBlock(trueTrampolineLabel);
+                    mipsFunction.addBasicBlock(trueTrampolineBlock);
+                    MipsBasicBlock savedBlock = currentMipsBlock;
+                    currentMipsBlock = trueTrampolineBlock;
+                    processPhiNodes(trueTarget);
+                    currentMipsBlock.addInstruction(new MipsBranch("j", trueLabel));
+                    currentMipsBlock = savedBlock;
+
+                } else {
+                    // 只有 false 分支有 Phi
+                    String falseTrampolineLabel = makeLabel(currentLLVMBlock) + "_to_" + falseTarget.getName();
+
+                    currentMipsBlock.addInstruction(new MipsBranch("bnez", MipsRegister.T0, trueLabel));
+                    currentMipsBlock.addInstruction(new MipsBranch("j", falseTrampolineLabel));
+
+                    MipsBasicBlock falseTrampolineBlock = new MipsBasicBlock(falseTrampolineLabel);
+                    mipsFunction.addBasicBlock(falseTrampolineBlock);
+                    MipsBasicBlock savedBlock = currentMipsBlock;
+                    currentMipsBlock = falseTrampolineBlock;
+                    processPhiNodes(falseTarget);
+                    currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+                    currentMipsBlock = savedBlock;
+                }
+            } else {
+                // 没有 Phi 工作，直接跳转
+                loadValueToRegister(inst.getOperand(0), MipsRegister.T0);
+                currentMipsBlock.addInstruction(new MipsBranch("bnez", MipsRegister.T0, trueLabel));
+                currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+            }
         } else {
             BasicBlock target = (BasicBlock) inst.getOperand(0);
             processPhiNodes(target);
             String label = makeLabel(target);
             currentMipsBlock.addInstruction(new MipsBranch("j", label));
         }
+    }
+
+    /**
+     * 检查目标块是否有来自当前块的 Phi 输入
+     */
+    private boolean hasPhiFromCurrentBlock(BasicBlock targetBlock) {
+        for (Instruction inst : targetBlock.getInstructions()) {
+            if (!(inst instanceof PhiInst phi)) {
+                break;
+            }
+            for (int i = 0; i < phi.getOperands().size(); i += 2) {
+                BasicBlock blk = (BasicBlock) phi.getOperand(i + 1);
+                if (blk == this.currentLLVMBlock) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private void translateCall(CallInst inst) {
@@ -391,9 +512,10 @@ public class OptimizedInstTranslator {
                 MipsRegister argReg = MipsRegister.values()[MipsRegister.A0.getId() + i];
                 loadValueToRegister(arg, argReg);
             } else {
+                // 超过4个的参数通过栈传递，偏移从0开始 (第5个参数在偏移0)
                 loadValueToRegister(arg, MipsRegister.T0);
                 currentMipsBlock.addInstruction(new MipsLoadStore(
-                    MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, i * 4));
+                    MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, (i - 4) * 4));
             }
         }
 
@@ -500,9 +622,22 @@ public class OptimizedInstTranslator {
         cacheValueToRegister(inst, MipsRegister.T2);
     }
 
-    // === Phi 节点处理 ===
+    // === Phi 节点处理 (Parallel Copy) ===
 
+    /**
+     * 处理 Phi 节点的并行拷贝
+     * 
+     * 策略：两阶段赋值，避免覆盖问题
+     * Phase 1: 读取所有源值到临时位置 (栈槽)
+     * Phase 2: 从临时位置写入到目标 Phi 槽位
+     * 
+     * 这样即使存在 x=y, y=x 的 swap 情况，也能正确处理
+     */
     private void processPhiNodes(BasicBlock targetBlock) {
+        // 收集所有需要处理的 Phi 及其对应的源值
+        List<PhiInst> phis = new ArrayList<>();
+        List<Value> incomingValues = new ArrayList<>();
+
         for (Instruction inst : targetBlock.getInstructions()) {
             if (!(inst instanceof PhiInst phi)) {
                 break;
@@ -519,12 +654,46 @@ public class OptimizedInstTranslator {
             }
 
             if (incomingValue != null) {
-                loadValueToRegister(incomingValue, MipsRegister.T0);
-                // Phi 的结果直接写入栈，因为是跨块的
-                int offset = stackManager.getOffset(phi);
-                currentMipsBlock.addInstruction(new MipsLoadStore(
-                    MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, offset));
+                phis.add(phi);
+                incomingValues.add(incomingValue);
             }
+        }
+
+        if (phis.isEmpty()) {
+            return;
+        }
+
+        // Phase 1: 读取所有源值到临时寄存器序列 ($s0-$s7 或栈)
+        // 为简化实现，我们使用 $t 寄存器的高位区域 + 栈作为临时存储
+        // 策略：使用 $s0-$s3 (callee-saved, 但我们在块内使用是安全的)
+        // 更保守的做法：全部通过栈中转
+
+        // 临时栈偏移（使用 Outgoing Args 区域，这块空间目前未被使用）
+        // 我们使用 SP + 0, SP + 4, SP + 8... 作为临时空间
+        // 注意：这依赖于 StackManager 在帧底部预留的 Outgoing Args 空间
+        
+        // Phase 1: 读取所有源值，暂存到栈的临时区域
+        List<Integer> tempOffsets = new ArrayList<>();
+        for (int i = 0; i < incomingValues.size(); i++) {
+            Value srcVal = incomingValues.get(i);
+            int tempOffset = i * 4; // 使用 Outgoing Args 区域
+            tempOffsets.add(tempOffset);
+
+            loadValueToRegister(srcVal, MipsRegister.T0);
+            currentMipsBlock.addInstruction(new MipsLoadStore(
+                MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, tempOffset));
+        }
+
+        // Phase 2: 从临时区域读取，写入到目标 Phi 槽位
+        for (int i = 0; i < phis.size(); i++) {
+            PhiInst phi = phis.get(i);
+            int tempOffset = tempOffsets.get(i);
+            int destOffset = stackManager.getOffset(phi);
+
+            currentMipsBlock.addInstruction(new MipsLoadStore(
+                MipsLoadStore.Type.LW, MipsRegister.T0, MipsRegister.SP, tempOffset));
+            currentMipsBlock.addInstruction(new MipsLoadStore(
+                MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, destOffset));
         }
     }
 

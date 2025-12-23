@@ -9,6 +9,11 @@ public class BranchInst extends Instruction {
     public BranchInst(BasicBlock target, BasicBlock parentBlock) {
         super(VoidType.get(), parentBlock);
         this.addOperand(target);
+        // 维护 CFG 关系
+        if (parentBlock != null) {
+            parentBlock.addSuccessor(target);
+            target.addPredecessor(parentBlock);
+        }
     }
 
     public BranchInst(Value cond, BasicBlock trueTarget, BasicBlock falseTarget, BasicBlock parentBlock) {
@@ -16,6 +21,13 @@ public class BranchInst extends Instruction {
         this.addOperand(cond);
         this.addOperand(trueTarget);
         this.addOperand(falseTarget);
+        // 维护 CFG 关系
+        if (parentBlock != null) {
+            parentBlock.addSuccessor(trueTarget);
+            trueTarget.addPredecessor(parentBlock);
+            parentBlock.addSuccessor(falseTarget);
+            falseTarget.addPredecessor(parentBlock);
+        }
     }
 
     public boolean isConditional() {
