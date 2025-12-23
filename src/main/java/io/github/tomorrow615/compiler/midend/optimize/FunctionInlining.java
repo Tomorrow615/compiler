@@ -352,8 +352,10 @@ public class FunctionInlining implements Pass {
             replaceAllUsesWith(callInst, retVal);
         } else {
             // 多返回值 -> 需要 Phi
-            PhiInst phi = new PhiInst(callInst.getType(), "inl_ret", splitBlock);
-            splitBlock.getInstructions().add(0, phi);
+            // [修复] 先创建 Phi（不传 parentBlock 避免自动添加），再手动插入头部
+            PhiInst phi = new PhiInst(callInst.getType(), "inl_ret", null);
+            phi.setParentBlock(splitBlock);
+            splitBlock.getInstructions().add(0, phi);  // 插入到头部
             
             for (ReturnInst ret : returns) {
                 Value retVal = resolveValue(ret.getReturnValue(), valueMap);
