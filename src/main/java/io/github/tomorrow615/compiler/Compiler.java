@@ -81,7 +81,9 @@ public class Compiler {
             // --- 步骤 6: LLVM IR 优化 ---
             if (Config.OPTIMIZE_LLVM) {
                 PassManager pm = new PassManager();
-                // SSA 构造 (Mem2Reg) - 必须第一个运行
+                // 数组标量化 - 必须在 Mem2Reg 之前
+                pm.addPass(new SROA_Simple());             // 拆分小数组 -> 多个 i32
+                // SSA 构造 (Mem2Reg) - 提升标量到寄存器
                 pm.addPass(new Mem2Reg());                   // alloca -> phi
                 pm.addPass(new SimplifyCFG());             // CFG 简化 (合并基本块，删除不可达块)
                 // 低风险优化 Pass

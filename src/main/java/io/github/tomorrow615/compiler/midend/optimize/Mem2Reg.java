@@ -330,9 +330,16 @@ public class Mem2Reg implements Pass {
             }
         }
 
-        // 从各块中移除
+        // 从各块中移除（使用迭代器删除以提高效率）
         for (BasicBlock bb : func.getBasicBlocks()) {
-            bb.getInstructions().removeAll(toRemove);
+            Iterator<Instruction> it = bb.getInstructions().iterator();
+            while (it.hasNext()) {
+                Instruction inst = it.next();
+                if (toRemove.contains(inst)) {
+                    inst.removeUseFromOperands();
+                    it.remove();
+                }
+            }
         }
     }
 
@@ -370,7 +377,12 @@ public class Mem2Reg implements Pass {
                         }
                         
                         // 如果所有输入都相同（或者只有自引用），则替换
-                        if (isTrivial && common != null) {
+                        if (isTrivial) {
+                            // 如果 common 为 null，说明 phi 只引用了自己，这是死逻辑
+                            // 用 ConstantInt(0) 替换，让 DCE 后续清理
+                            if (common == null) {
+                                common = new ConstantInt(0);
+                            }
                             replaceAllUsesWith(phi, common);
                             toRemove.add(phi);
                             changed = true;
