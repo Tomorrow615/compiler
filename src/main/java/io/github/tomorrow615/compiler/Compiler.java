@@ -89,12 +89,16 @@ public class Compiler {
                 pm.addPass(new Mem2Reg());                 // 3. 提升到寄存器
                 pm.addPass(new SimplifyCFG());             // 4. CFG 简化（含分支折叠）
                 
+                // === 循环优化 ===
+                pm.addPass(new LICM());                    // 5. 循环不变量外提 [Phase 1.3]
+                
                 // === 迭代优化 ===
-                pm.addPass(new ConstantFolding());         // 5. 常量折叠
-                pm.addPass(new DeadCodeElimination());     // 6. 死代码消除
-                pm.addPass(new AlgebraicSimplification()); // 7. 代数简化
-                pm.addPass(new ArithmeticOptimization());  // 8. 乘除优化
-                pm.addPass(new CommonSubexprElimination()); // 9. CSE
+                pm.addPass(new ConstantFolding());         // 6. 常量折叠
+                pm.addPass(new DeadCodeElimination());     // 7. 死代码消除
+                pm.addPass(new AlgebraicSimplification()); // 8. 代数简化
+                pm.addPass(new ArithmeticOptimization());  // 9. 乘除优化
+                pm.addPass(new GVN());                     // 10. 全局值编号 [Phase 1.4]
+
                 
                 // === 最终清理 ===
                 pm.addPass(new SimplifyCFG());             // 10. 再次 CFG 清理

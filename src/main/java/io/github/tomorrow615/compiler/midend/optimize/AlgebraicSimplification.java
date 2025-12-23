@@ -37,6 +37,11 @@ public class AlgebraicSimplification implements Pass {
                 List<Instruction> toRemove = new ArrayList<>();
                 
                 for (Instruction inst : bb.getInstructions()) {
+                    // [Fix] 先进行操作数归一化：将常数放到右边
+                    if (canonicalizeOperands(inst)) {
+                        changed = true;
+                    }
+                    
                     Value result = trySimplify(inst);
                     if (result != null) {
                         replaceAllUsesWith(inst, result);
@@ -49,6 +54,36 @@ public class AlgebraicSimplification implements Pass {
             }
         }
     }
+    
+    /**
+     * [Fix] 操作数归一化：对于可交换运算，将常数放到右边
+     * 这样 5 * x 变成 x * 5，便于 ArithmeticOptimization 处理
+     * @return true 如果进行了交换
+     */
+    private boolean canonicalizeOperands(Instruction inst) {
+        if (!(inst instanceof BinaryOpInst bin)) {
+            return false;
+        }
+        
+        BinaryOpInst.OpCode op = bin.getOp();
+        // 只处理可交换运算
+        if (op != BinaryOpInst.OpCode.ADD && op != BinaryOpInst.OpCode.MUL) {
+            return false;
+        }
+        
+        Value lhs = bin.getLhs();
+        Value rhs = bin.getRhs();
+        
+        // 如果左边是常数，右边不是常数，则交换
+        if (lhs instanceof ConstantInt && !(rhs instanceof ConstantInt)) {
+            bin.setOperand(0, rhs);
+            bin.setOperand(1, lhs);
+            return true;
+        }
+        
+        return false;
+    }
+
 
     private Value trySimplify(Instruction inst) {
         if (!(inst instanceof BinaryOpInst bin)) {

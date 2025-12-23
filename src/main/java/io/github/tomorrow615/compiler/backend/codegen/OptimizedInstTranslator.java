@@ -244,6 +244,18 @@ public class OptimizedInstTranslator {
             }
         }
 
+        // [Phase 1.1] 特殊处理：常量取模优化 (SREM Magic Number)
+        // 公式: a % b = a - (a / b) * b
+        if (inst.getOp() == BinaryOpInst.OpCode.SREM && inst.getRhs() instanceof ConstantInt constMod) {
+            int divisor = constMod.getValue();
+            if (divisor > 1 && !isPowerOfTwo(divisor)) {
+                if (translateRemByMagicNumber(inst, divisor)) {
+                    return;
+                }
+            }
+        }
+
+
         // 加载操作数到临时寄存器 $t0, $t1
         loadValueToRegister(inst.getLhs(), MipsRegister.T0);
         loadValueToRegister(inst.getRhs(), MipsRegister.T1);
@@ -327,9 +339,75 @@ public class OptimizedInstTranslator {
         return true;
     }
 
+    /**
+     * [Phase 1.1] 使用 Magic Number 方法翻译常量取模
+     * 公式: a % b = a - (a / b) * b
+     * 
+     * 先用 Magic Number 算出 q = a / b，再算 rem = a - q * b
+     * 
+     * @return true 如果成功优化，false 则回退到普通取模
+     */
+    private boolean translateRemByMagicNumber(BinaryOpInst inst, int divisor) {
+        // 计算 Magic Number
+        MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
+        if (magic == null) {
+            return false;
+        }
+
+        // 如果乘数超过 32 位有符号范围，暂不处理
+        if (magic.multiplier > Integer.MAX_VALUE || magic.multiplier < Integer.MIN_VALUE) {
+            return false;
+        }
+
+        // Step 1: 加载被除数到 $t0，并保存副本到 $s0 (用于最终计算 a - q*b)
+        // 注意：$s0 是 callee-saved，我们临时借用，但在块内是安全的
+        loadValueToRegister(inst.getLhs(), MipsRegister.T0);
+        // 保存 a 的副本到栈 (使用 $t8 作为临时保存)
+        currentMipsBlock.addInstruction(new MipsBinary("addu", MipsRegister.T8, MipsRegister.T0, MipsRegister.ZERO));
+
+        // Step 2: 计算 q = a / b (使用 Magic Number)
+        int m = (int) magic.multiplier;
+        currentMipsBlock.addInstruction(new MipsLi(MipsRegister.T1, m));
+
+        // mult $t0, $t1 (有符号乘法)
+        currentMipsBlock.addInstruction(new MipsBinary("mult", MipsRegister.T0, MipsRegister.T1));
+
+        // mfhi $t2 (取高 32 位)
+        currentMipsBlock.addInstruction(new MipsBinary("mfhi", MipsRegister.T2));
+
+        // 如果需要加法修正 (needsAdd)
+        if (magic.needsAdd) {
+            currentMipsBlock.addInstruction(new MipsBinary("addu", MipsRegister.T2, MipsRegister.T2, MipsRegister.T0));
+        }
+
+        // 算术右移 shift 位
+        if (magic.shift > 0) {
+            currentMipsBlock.addInstruction(new MipsBinary("sra", MipsRegister.T2, MipsRegister.T2, magic.shift));
+        }
+
+        // 符号修正
+        currentMipsBlock.addInstruction(new MipsBinary("sra", MipsRegister.T1, MipsRegister.T0, 31));
+        currentMipsBlock.addInstruction(new MipsBinary("subu", MipsRegister.T2, MipsRegister.T2, MipsRegister.T1));
+        // 现在 $t2 = q = a / b
+
+        // Step 3: 计算 q * b
+        currentMipsBlock.addInstruction(new MipsLi(MipsRegister.T1, divisor));
+        currentMipsBlock.addInstruction(new MipsBinary("mul", MipsRegister.T2, MipsRegister.T2, MipsRegister.T1));
+        // 现在 $t2 = q * b
+
+        // Step 4: 计算 rem = a - q * b
+        currentMipsBlock.addInstruction(new MipsBinary("subu", MipsRegister.T2, MipsRegister.T8, MipsRegister.T2));
+        // 现在 $t2 = a - q * b = a % b
+
+        // 将结果缓存到寄存器
+        cacheValueToRegister(inst, MipsRegister.T2);
+        return true;
+    }
+
     private boolean isPowerOfTwo(int n) {
         return n > 0 && (n & (n - 1)) == 0;
     }
+
 
     private void translateLoad(LoadInst inst) {
         // 获取指针地址到 $t0

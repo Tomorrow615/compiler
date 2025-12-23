@@ -136,8 +136,79 @@ public class ArithmeticOptimization implements Pass {
                 yield result;
             }
             case SREM -> {
-                // 取模优化暂不处理（生成指令数多，可能不划算）
-                yield null;
+                // [Phase 1.1] x % 2^k 的正确实现（处理正负数）
+                // 公式: rem = x - (x / 2^k) * 2^k
+                // 利用已有的除法优化：q = (x + ((x >> 31) & (2^k - 1))) >> k
+                // 然后 rem = x - (q << k)
+                
+                if (k == 0) {
+                    // x % 1 = 0
+                    yield List.of();
+                }
+                
+                List<Instruction> result = new ArrayList<>();
+                
+                // t1 = x >> 31 (算术右移，获取符号扩展)
+                Instruction t1 = new BinaryOpInst(
+                    BinaryOpInst.OpCode.ASHR,
+                    lhs,
+                    new ConstantInt(31),
+                    bin.getName() + "_sign",
+                    null
+                );
+                result.add(t1);
+                
+                // t2 = t1 & (2^k - 1)  (负数得 2^k-1，正数得 0)
+                Instruction t2 = new BinaryOpInst(
+                    BinaryOpInst.OpCode.AND,
+                    t1,
+                    new ConstantInt((1 << k) - 1),
+                    bin.getName() + "_mask",
+                    null
+                );
+                result.add(t2);
+                
+                // t3 = x + t2  (加上修正值)
+                Instruction t3 = new BinaryOpInst(
+                    BinaryOpInst.OpCode.ADD,
+                    lhs,
+                    t2,
+                    bin.getName() + "_adj",
+                    null
+                );
+                result.add(t3);
+                
+                // t4 = t3 >> k  (商)
+                Instruction t4 = new BinaryOpInst(
+                    BinaryOpInst.OpCode.ASHR,
+                    t3,
+                    new ConstantInt(k),
+                    bin.getName() + "_quot",
+                    null
+                );
+                result.add(t4);
+                
+                // t5 = t4 << k  (商 * 2^k)
+                Instruction t5 = new BinaryOpInst(
+                    BinaryOpInst.OpCode.SHL,
+                    t4,
+                    new ConstantInt(k),
+                    bin.getName() + "_qmul",
+                    null
+                );
+                result.add(t5);
+                
+                // final = x - t5  (余数)
+                Instruction finalResult = new BinaryOpInst(
+                    BinaryOpInst.OpCode.SUB,
+                    lhs,
+                    t5,
+                    bin.getName(),
+                    null
+                );
+                result.add(finalResult);
+                
+                yield result;
             }
             default -> null;
         };
