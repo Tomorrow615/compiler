@@ -9,7 +9,7 @@ import java.util.List;
 
 public class BasicBlock extends Value {
     private final List<Instruction> instructions;
-    private final Function parentFunction;
+    private Function parentFunction;  // 改为非 final，支持内联时修改
     
     // CFG 关系：前驱和后继基本块
     private final List<BasicBlock> predecessors;
@@ -33,6 +33,14 @@ public class BasicBlock extends Value {
     public Function getParentFunction() {
         return parentFunction;
     }
+    
+    /**
+     * 设置父函数（用于函数内联时克隆块）
+     */
+    public void setParentFunction(Function parentFunction) {
+        this.parentFunction = parentFunction;
+    }
+
 
     public void addInstruction(Instruction inst) {
         this.instructions.add(inst);
