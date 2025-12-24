@@ -28,6 +28,8 @@ public class SimplifyCFG implements Pass {
             changed |= removeUnreachableBlocks(function);
             // 3. 合并基本块
             changed |= mergeBlocks(function);
+            // 4. 【关键】简化只有一个 incoming 的 Phi 节点
+            changed |= simplifySingleIncomingPhis(function);
         }
     }
 
@@ -106,10 +108,20 @@ public class SimplifyCFG implements Pass {
         if (toRemove.isEmpty()) return false;
         
         for (BasicBlock bb : toRemove) {
+            // 1. 【关键】先通知所有后继块：移除该前驱对应的 Phi incoming
             for (BasicBlock succ : bb.getSuccessors()) {
                 succ.getPredecessors().remove(bb);
                 cleanPhiNodes(succ, bb);
             }
+            
+            // 2. 【关键增强】彻底断开块中所有指令
+            for (Instruction inst : bb.getInstructions()) {
+                inst.removeUseFromOperands();     // 断开 Use-Def 链
+                inst.setParentBlock(null);        // 显式移除父块引用，防止幽灵引用
+            }
+            bb.getInstructions().clear();         // 清空指令列表
+            bb.getSuccessors().clear();           // 清空后继列表
+            bb.getPredecessors().clear();         // 清空前驱列表
         }
         function.getBasicBlocks().removeAll(toRemove);
         return true;
@@ -158,16 +170,23 @@ public class SimplifyCFG implements Pass {
     
     /**
      * 【修复】清理 Phi 节点，移除指定前驱的 incoming
+     * 注意：必须正确维护 Use-Def 链，使用倒序遍历避免索引偏移问题
      */
     private void cleanPhiNodes(BasicBlock bb, BasicBlock predToRemove) {
         for (Instruction inst : bb.getInstructions()) {
             if (inst instanceof PhiInst phi) {
-                for (int i = 0; i < phi.getOperands().size(); i += 2) {
+                List<Use> operands = phi.getOperands();
+                // 【关键】使用倒序遍历，安全删除，处理可能的多重引用
+                for (int i = operands.size() - 2; i >= 0; i -= 2) {
                     if (phi.getOperand(i + 1) == predToRemove) {
-                        phi.getOperands().remove(i + 1); // 移除 Block
-                        phi.getOperands().remove(i);     // 移除 Value
-                        // 标准 LLVM 中一个前驱在 Phi 中只出现一次
-                        break;
+                        // 先断开 Use-Def 链
+                        operands.get(i).setValue(null);     // 断开 Value 的引用
+                        operands.get(i + 1).setValue(null); // 断开 Block 的引用
+                        
+                        // 然后移除
+                        operands.remove(i + 1);
+                        operands.remove(i);
+                        // 继续检查，不 break，处理可能的多重引用（虽然标准 LLVM 不应该有）
                     }
                 }
             } else {
@@ -187,6 +206,66 @@ public class SimplifyCFG implements Pass {
             } else {
                 break;
             }
+        }
+    }
+    
+    /**
+     * 【关键优化】简化只有一个 incoming 的 Phi 节点
+     * 
+     * 场景：内联后创建的 Phi 可能因为死分支被删除而只剩一个 incoming，
+     * 或者 mergeBlocks 把 Phi 移到了块的中间位置。
+     * 
+     * 【修复】遍历块中的所有指令，而不是只看开头。
+     */
+    private boolean simplifySingleIncomingPhis(Function function) {
+        boolean changed = false;
+        
+        for (BasicBlock bb : function.getBasicBlocks()) {
+            // 收集需要处理的 Phi，避免迭代时修改
+            List<PhiInst> toSimplify = new ArrayList<>();
+            
+            for (Instruction inst : bb.getInstructions()) {
+                if (inst instanceof PhiInst phi) {
+                    // 检查 Phi 是否只有一个 incoming 或没有 incoming
+                    if (phi.getOperands().size() <= 2) {
+                        toSimplify.add(phi);
+                    }
+                }
+            }
+            
+            // 处理收集到的 Phi
+            for (PhiInst phi : toSimplify) {
+                if (phi.getOperands().size() == 2) {
+                    // 只有一个 [value, block] 对
+                    Value singleValue = phi.getOperand(0);
+                    
+                    // 将 Phi 的所有使用替换为这个唯一的值
+                    replaceAllUsesWith(phi, singleValue);
+                    
+                    // 断开 Phi 的操作数引用
+                    phi.removeUseFromOperands();
+                    
+                    // 从块中移除 Phi
+                    bb.getInstructions().remove(phi);
+                    
+                    changed = true;
+                } else if (phi.getOperands().isEmpty()) {
+                    // 空 Phi（没有 incoming），删除它
+                    phi.removeUseFromOperands();
+                    bb.getInstructions().remove(phi);
+                    changed = true;
+                }
+            }
+        }
+        
+        return changed;
+    }
+    
+    private void replaceAllUsesWith(Value oldValue, Value newValue) {
+        // 复制一份，避免并发修改
+        List<Use> usersSnapshot = new ArrayList<>(oldValue.getUsers());
+        for (Use use : usersSnapshot) {
+            use.setValue(newValue);
         }
     }
 }

@@ -78,38 +78,71 @@ public class Compiler {
                 irPrinter.print(llvmModule);
             }
 
-            // --- 步骤 6: LLVM IR 优化 ---
+            // --- 步骤 6: LLVM IR 优化（激进内联版） ---
             if (Config.OPTIMIZE_LLVM) {
-                PassManager pm = new PassManager();
-                // === 内存优化前置准备 ===
-                pm.addPass(new SROA_Simple());             // 1. 拆解数组
-                pm.addPass(new Global2Local());            // 2. 全局变量本地化
+                // === Phase 1: 内存优化前置 ===
+                runPass(llvmModule, new SROA_Simple());
+                runPass(llvmModule, new Global2Local());
+                runPass(llvmModule, new Mem2Reg());
+                runPass(llvmModule, new SimplifyCFG());
                 
-                // === 核心 SSA 构造 ===
-                pm.addPass(new Mem2Reg());                 // 3. 提升到寄存器
-                pm.addPass(new SimplifyCFG());             // 4. CFG 简化（含分支折叠）
+                // === Phase 2: 洋葱剥皮法 (Onion Peeling) ===
+                // 控制递归展开深度，设置合理上限防止 TLE
+                int MAX_INLINE_ITERATIONS = 10;
                 
-                // === 函数内联 [Phase 1.5] ===
-                pm.addPass(new FunctionInlining());        // 5. 函数内联
-                pm.addPass(new Mem2Reg());                 // 6. 内联后再次 Mem2Reg（处理新 alloca）
-                pm.addPass(new SimplifyCFG());             // 7. 内联后 CFG 清理
+                for (int i = 0; i < MAX_INLINE_ITERATIONS; i++) {
+                    int before = countModuleInstructions(llvmModule);
+                    
+                    // 1. 【剥皮】内联一层
+                    runPass(llvmModule, new FunctionInlining());
+                    
+                    // 2. 【清理】内联产生的 alloca 和冗余计算
+                    runPass(llvmModule, new SROA_Simple()); // 新增！内联可能暴露新的小数组/结构体
+                    runPass(llvmModule, new Mem2Reg());
+                    runPass(llvmModule, new GVN());         // 关键！把 fib(5) 折叠成 8，让下一层 fib(8) 能继续内联
+                    
+                    // 3. 【粉碎】核心清理循环 (SimplifyCFG + DCE + ConstFold)
+                    // 必须把 fib(4) 产生的 if(4==1) 分支立刻算死并删掉
+                    // 【修复】添加最大迭代限制防止死循环
+                    int MAX_INNER_ITERATIONS = 10;
+                    for (int j = 0; j < MAX_INNER_ITERATIONS; j++) {
+                        int innerBefore = countModuleInstructions(llvmModule);
+                        
+                        // 常量折叠：算出 4==1 是 false
+                        runPass(llvmModule, new ConstantFolding());
+                        
+                        // 控制流简化：砍掉死分支，删除不可达块
+                        runPass(llvmModule, new SimplifyCFG());
+                        
+                        // 死代码消除
+                        runPass(llvmModule, new DeadCodeElimination());
+                        
+                        // 算术优化（有时候算术也能消掉分支）
+                        runPass(llvmModule, new ArithmeticOptimization());
+                        
+                        int innerAfter = countModuleInstructions(llvmModule);
+                        // 收敛则提前退出
+                        if (innerBefore == innerAfter) break;
+                    }
+                    
+                    int after = countModuleInstructions(llvmModule);
+                    
+                    // 收敛检测：无变化则提前退出
+                    if (before == after) break;
+                    
+                    // 【熔断】代码爆炸则强制停止（降低阈值防止 TLE）
+                    if (after > 5000) {
+                        break;
+                    }
+                }
                 
-                // === 循环优化 ===
-                pm.addPass(new LICM());                    // 8. 循环不变量外提 [Phase 1.3]
-                
-                // === 迭代优化 ===
-                pm.addPass(new ConstantFolding());         // 9. 常量折叠
-                pm.addPass(new DeadCodeElimination());     // 10. 死代码消除
-                pm.addPass(new AlgebraicSimplification()); // 11. 代数简化
-                pm.addPass(new ArithmeticOptimization());  // 12. 乘除优化
-                pm.addPass(new GVN());                     // 13. 全局值编号 [Phase 1.4]
-
-
-                
-                // === 最终清理 ===
-                pm.addPass(new SimplifyCFG());             // 10. 再次 CFG 清理
-                pm.addPass(new DeadCodeElimination());     // 11. 最终死代码清理
-                pm.runOnModule(llvmModule);
+                // === Phase 3: 收尾优化 ===
+                runPass(llvmModule, new AlgebraicSimplification());
+                runPass(llvmModule, new ArithmeticOptimization());
+                runPass(llvmModule, new LICM());
+                runPass(llvmModule, new GVN());
+                runPass(llvmModule, new SimplifyCFG());
+                runPass(llvmModule, new DeadCodeElimination());
                 
                 // Mem2Reg 后重新编号所有 SSA 值，修复 IR 乱码
                 renumberValues(llvmModule);
@@ -132,6 +165,27 @@ public class Compiler {
             System.err.println("文件读写时发生错误: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+
+    /**
+     * 运行单个优化 Pass
+     */
+    private static void runPass(Module module, Pass pass) {
+        pass.runOnModule(module);
+    }
+    
+    /**
+     * 统计模块中的总指令数（用于收敛检测）
+     */
+    private static int countModuleInstructions(Module module) {
+        int count = 0;
+        for (io.github.tomorrow615.compiler.midend.llvm.value.Function func : module.getFunctions()) {
+            if (func.isDeclaration()) continue;
+            for (io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock bb : func.getBasicBlocks()) {
+                count += bb.getInstructions().size();
+            }
+        }
+        return count;
     }
 
     /**

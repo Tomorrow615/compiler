@@ -260,6 +260,11 @@ public class LICM implements Pass {
             return false;
         }
         
+        // 【防御】指令本身必须有 parentBlock
+        if (inst.getParentBlock() == null) {
+            return false;
+        }
+        
         // 检查所有操作数
         for (Use use : inst.getOperands()) {
             Value operand = use.getValue();
@@ -277,6 +282,11 @@ public class LICM implements Pass {
             // 如果操作数是指令，检查其定义位置
             if (operand instanceof Instruction opInst) {
                 BasicBlock defBlock = opInst.getParentBlock();
+                
+                // 【防御】parentBlock 为 null 的指令视为不安全
+                if (defBlock == null) {
+                    return false;
+                }
                 
                 // 定义在循环外
                 if (!loop.contains(defBlock)) {
@@ -336,8 +346,13 @@ public class LICM implements Pass {
         if (insertPos < 0) insertPos = 0;
         
         for (Instruction inst : sorted) {
-            // 从原来的块中移除
+            // 【防御】跳过 parentBlock 为 null 的指令
             BasicBlock originalBlock = inst.getParentBlock();
+            if (originalBlock == null) {
+                continue;
+            }
+            
+            // 从原来的块中移除
             originalBlock.getInstructions().remove(inst);
             
             // 插入到 Pre-Header

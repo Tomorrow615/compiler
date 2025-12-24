@@ -17,11 +17,14 @@ import java.util.stream.Collectors;
  */
 public class FunctionInlining implements Pass {
 
-    // 最大内联指令数阈值
-    private static final int INLINE_THRESHOLD = 200;
+    // 激进的内联阈值：允许内联较大的函数
+    private static final int INLINE_THRESHOLD = 500;
     
-    // 内联计数器（用于生成唯一名称）
-    private int inlineCounter = 0;
+    // Caller 体积保护：防止单个函数过大导致寄存器分配崩溃
+    private static final int MAX_CALLER_SIZE = 10000;
+    
+    // 内联计数器（静态，确保多轮迭代时唯一性）
+    private static int inlineCounter = 0;
 
     @Override
     public String getName() {
@@ -30,31 +33,46 @@ public class FunctionInlining implements Pass {
 
     @Override
     public void runOnModule(Module module) {
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            // 收集所有需要内联的调用点 (CallInst)
-            List<CallInst> inlineCandidates = new ArrayList<>();
-            
-            for (Function func : module.getFunctions()) {
-                if (func.isDeclaration()) continue;
-                for (BasicBlock bb : func.getBasicBlocks()) {
-                    for (Instruction inst : bb.getInstructions()) {
-                        if (inst instanceof CallInst call) {
-                            Function callee = call.getFunction();
-                            if (canInline(callee, func)) {
-                                inlineCandidates.add(call);
-                            }
+        // 【激进内联】单轮执行：每次调用只展开一层
+        // 递归展开由外层 Compiler.java 的多轮迭代控制
+        // 这样避免了内部 while 循环导致的死循环
+        
+        // 收集所有需要内联的调用点 (CallInst)
+        List<CallInst> inlineCandidates = new ArrayList<>();
+        
+        for (Function func : module.getFunctions()) {
+            if (func.isDeclaration()) continue;
+            for (BasicBlock bb : func.getBasicBlocks()) {
+                for (Instruction inst : bb.getInstructions()) {
+                    if (inst instanceof CallInst call) {
+                        Function callee = call.getFunction();
+                        if (canInline(callee, func)) {
+                            inlineCandidates.add(call);
                         }
                     }
                 }
             }
+        }
 
-            // 执行内联
-            for (CallInst call : inlineCandidates) {
-                performInline(call);
-                changed = true;
-            }
+        // 【修复】限制每轮内联的数量，防止单轮内联过多导致代码膨胀
+        int MAX_INLINES_PER_ROUND = 50;
+        int inlineCount = 0;
+        
+        // 执行内联（只展开一层）
+        for (CallInst call : inlineCandidates) {
+            // 【安全检查】确保 callInst 仍然有效（父块还存在）
+            if (call.getParentBlock() == null) continue;
+            Function caller = call.getParentBlock().getParentFunction();
+            if (caller == null) continue;
+            
+            // 【安全检查】再次检查 caller 大小，防止前面的内联导致 caller 过大
+            if (countInstructions(caller) > MAX_CALLER_SIZE) continue;
+            
+            performInline(call);
+            inlineCount++;
+            
+            // 达到限制则停止本轮内联
+            if (inlineCount >= MAX_INLINES_PER_ROUND) break;
         }
     }
 
@@ -67,33 +85,44 @@ public class FunctionInlining implements Pass {
 
     /**
      * 判断是否可以内联
+     * 
+     * 激进策略（配合洋葱剥皮法）：
+     * 1. 库函数不能内联
+     * 2. 禁止直接递归（fib 内不展开 fib）→ 防止无限循环
+     * 3. 允许跨函数内联递归函数（main 可以内联 fib）
+     * 4. 依靠 MAX_CALLER_SIZE 和外层 MAX_INLINE_ITERATIONS 控制
      */
     private boolean canInline(Function callee, Function caller) {
-        // 1. 库函数不能内联 (没有函数体)
+        // 1. 硬性限制：库函数不能内联
         if (callee.isDeclaration()) return false;
         
-        // 2. 直接递归调用不能内联 (caller 调用自己)
+        // 2.【关键】禁止直接递归，防止无限循环
+        // fib 内不展开 fib，但 main 可以内联 fib
         if (callee == caller) return false;
         
-        // 3. [修复] 被调函数自身是递归的，不能内联
-        // 否则内联后会产生新的 CallInst，再次尝试内联，导致无限循环
-        for (BasicBlock bb : callee.getBasicBlocks()) {
-            for (Instruction inst : bb.getInstructions()) {
-                if (inst instanceof CallInst call) {
-                    // callee 调用自己 -> 自递归，不内联
-                    if (call.getFunction() == callee) return false;
-                    // callee 调用 caller -> 互递归，不内联
-                    if (call.getFunction() == caller) return false;
-                }
-            }
-        }
+        // 3.【激进】允许跨函数内联自递归函数
+        // main 调用 fib(4) 时，fib 被内联到 main
+        // 内联后产生的 fib(3), fib(2) 调用会在下一轮继续处理
+        // 因为此时 caller 是 main，callee 是 fib，不触发上面的限制
         
-        // 4. 避免代码膨胀，太大的函数不内联
-        int instCount = 0;
-        for (BasicBlock bb : callee.getBasicBlocks()) {
-            instCount += bb.getInstructions().size();
+        // 4. Caller 体积保护（防止爆炸的最后一道防线）
+        int callerSize = countInstructions(caller);
+        if (callerSize > MAX_CALLER_SIZE) return false;
+        
+        // 5. Callee 大小限制
+        int calleeSize = countInstructions(callee);
+        return calleeSize < INLINE_THRESHOLD;
+    }
+    
+    /**
+     * 统计函数指令数
+     */
+    private int countInstructions(Function func) {
+        int count = 0;
+        for (BasicBlock bb : func.getBasicBlocks()) {
+            count += bb.getInstructions().size();
         }
-        return instCount < INLINE_THRESHOLD;
+        return count;
     }
 
 
@@ -308,6 +337,7 @@ public class FunctionInlining implements Pass {
 
     /**
      * 填充克隆的 Phi 节点的 incoming 值
+     * 【关键修复】跳过死路径，防止引入 null 引用或幽灵块
      */
     private void fixupPhiOperands(Instruction oldInst, Instruction newInst,
                                    Map<Value, Value> valueMap, Map<BasicBlock, BasicBlock> blockMap) {
@@ -315,9 +345,17 @@ public class FunctionInlining implements Pass {
             for (int i = 0; i < oldPhi.getOperands().size(); i += 2) {
                 Value oldVal = oldPhi.getOperand(i);
                 BasicBlock oldBlock = (BasicBlock) oldPhi.getOperand(i + 1);
-                Value newVal = resolveValue(oldVal, valueMap);
+                
+                // 【关键修复】检查块是否被克隆了
+                // 如果 oldBlock 是死代码（不可达），它可能不在 blockMap 中
                 BasicBlock newBlock = blockMap.get(oldBlock);
-                if (newBlock != null) {
+                if (newBlock == null) {
+                    continue; // 跳过死路径！防止引入幽灵块
+                }
+                
+                Value newVal = resolveValue(oldVal, valueMap);
+                // 确保 newValue 也不是 null
+                if (newVal != null) {
                     newPhi.addIncoming(newVal, newBlock);
                 }
             }
@@ -326,44 +364,55 @@ public class FunctionInlining implements Pass {
 
     /**
      * 处理返回指令，连接到 splitBlock
+     * 【修复】先过滤死路径，避免 null 块引发问题
      */
     private void handleReturns(List<ReturnInst> returns, Map<BasicBlock, BasicBlock> blockMap,
                                Map<Value, Value> valueMap, BasicBlock splitBlock, CallInst callInst) {
         if (returns.isEmpty()) return;
         
+        // 【关键修复】先过滤掉死路径的返回
+        List<ReturnInst> validReturns = new ArrayList<>();
+        for (ReturnInst ret : returns) {
+            if (blockMap.containsKey(ret.getParentBlock())) {
+                validReturns.add(ret);
+            }
+        }
+        
+        // 如果没有有效的返回路径（Callee 内部全是死代码），用 0 替换
+        if (validReturns.isEmpty()) {
+            if (!callInst.getType().isVoidType()) {
+                replaceAllUsesWith(callInst, new ConstantInt(0));
+            }
+            return;
+        }
+        
         boolean isVoidReturn = callInst.getType().isVoidType();
         
         if (isVoidReturn) {
             // Void 返回，只需要跳转
-            for (ReturnInst ret : returns) {
+            for (ReturnInst ret : validReturns) {
                 BasicBlock retBlock = blockMap.get(ret.getParentBlock());
-                // [修复] BranchInst 构造函数会自动添加到 retBlock 并更新 CFG
                 new BranchInst(splitBlock, retBlock);
             }
-        } else if (returns.size() == 1) {
+        } else if (validReturns.size() == 1) {
             // 单一返回值
-            ReturnInst ret = returns.get(0);
+            ReturnInst ret = validReturns.get(0);
+            BasicBlock retBlock = blockMap.get(ret.getParentBlock());
             Value retVal = resolveValue(ret.getReturnValue(), valueMap);
             
-            BasicBlock retBlock = blockMap.get(ret.getParentBlock());
-            // [修复] BranchInst 构造函数会自动添加到 retBlock 并更新 CFG
             new BranchInst(splitBlock, retBlock);
-            
             replaceAllUsesWith(callInst, retVal);
         } else {
             // 多返回值 -> 需要 Phi
-            // [修复] 先创建 Phi（不传 parentBlock 避免自动添加），再手动插入头部
             PhiInst phi = new PhiInst(callInst.getType(), "inl_ret", null);
             phi.setParentBlock(splitBlock);
             splitBlock.getInstructions().add(0, phi);  // 插入到头部
             
-            for (ReturnInst ret : returns) {
-                Value retVal = resolveValue(ret.getReturnValue(), valueMap);
+            for (ReturnInst ret : validReturns) {
                 BasicBlock retBlock = blockMap.get(ret.getParentBlock());
+                Value retVal = resolveValue(ret.getReturnValue(), valueMap);
                 
-                // [修复] BranchInst 构造函数会自动添加到 retBlock 并更新 CFG
                 new BranchInst(splitBlock, retBlock);
-                
                 phi.addIncoming(retVal, retBlock);
             }
             

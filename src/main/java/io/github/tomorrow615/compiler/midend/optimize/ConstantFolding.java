@@ -53,7 +53,54 @@ public class ConstantFolding implements Pass {
         if (inst instanceof BinaryOpInst bin) {
             return foldBinaryOp(bin);
         }
-        // 可扩展：IcmpInst 等
+        // 【新增】折叠比较指令（icmp）
+        if (inst instanceof IcmpInst icmp) {
+            return foldIcmp(icmp);
+        }
+        // 【新增】折叠 zext i1 -> i32（如果操作数是常量）
+        if (inst instanceof ZextInst zext) {
+            return foldZext(zext);
+        }
+        return null;
+    }
+    
+    /**
+     * 【新增】折叠比较指令（关键：使得 `icmp eq i32 4, 1` 变成常量 0）
+     */
+    private ConstantInt foldIcmp(IcmpInst icmp) {
+        Value lhs = icmp.getLhs();
+        Value rhs = icmp.getRhs();
+        
+        if (!(lhs instanceof ConstantInt c1) || !(rhs instanceof ConstantInt c2)) {
+            return null;
+        }
+        
+        int v1 = c1.getValue();
+        int v2 = c2.getValue();
+        boolean result;
+        
+        result = switch (icmp.getCmpType()) {
+            case EQ -> v1 == v2;
+            case NE -> v1 != v2;
+            case SGT -> v1 > v2;
+            case SGE -> v1 >= v2;
+            case SLT -> v1 < v2;
+            case SLE -> v1 <= v2;
+        };
+        
+        // icmp 返回 i1（0 或 1）
+        return new ConstantInt(result ? 1 : 0);
+    }
+    
+    /**
+     * 【新增】折叠 zext i1 -> i32
+     */
+    private ConstantInt foldZext(ZextInst zext) {
+        Value operand = zext.getOperand(0);
+        if (operand instanceof ConstantInt c) {
+            // zext 只是扩展整数宽度，值不变
+            return new ConstantInt(c.getValue());
+        }
         return null;
     }
 
