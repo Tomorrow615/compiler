@@ -10,10 +10,19 @@ import java.util.Map;
 public class MipsFunction {
     private final String name;
     private final List<MipsBasicBlock> blocks;
+    private io.github.tomorrow615.compiler.backend.codegen.StackManager stackManager;
 
     public MipsFunction(String name) {
         this.name = name;
         this.blocks = new ArrayList<>();
+    }
+
+    public void setStackManager(io.github.tomorrow615.compiler.backend.codegen.StackManager stackManager) {
+        this.stackManager = stackManager;
+    }
+
+    public io.github.tomorrow615.compiler.backend.codegen.StackManager getStackManager() {
+        return stackManager;
     }
 
     public void addBasicBlock(MipsBasicBlock block) {
@@ -92,6 +101,7 @@ public class MipsFunction {
         // 函数名作为注释或直接作为入口标签的一部分（具体由第一个Block的标签决定）
         // 这里我们简单打印一个注释分隔符
         sb.append("\n# === Function: ").append(name).append(" ===\n");
+        sb.append(".globl ").append(name).append("\n");
 
         for (MipsBasicBlock block : blocks) {
             sb.append(block.toString()); // 基本块自带换行

@@ -73,6 +73,25 @@ public class SemanticVisitor {
 
         FuncSymbol getintFunc = new FuncSymbol("getint", SymbolType.IntFunc, 0);
         currentScope.addBuiltInSymbol(getintFunc);
+        FuncSymbol getchFunc = new FuncSymbol("getch", SymbolType.IntFunc, 0);
+        currentScope.addBuiltInSymbol(getchFunc);
+        
+        FuncSymbol putintFunc = new FuncSymbol("putint", SymbolType.VoidFunc, 0);
+        putintFunc.addParameter(new ValueSymbol("n", SymbolType.Int, 0, 0));
+        currentScope.addBuiltInSymbol(putintFunc);
+        
+        FuncSymbol putchFunc = new FuncSymbol("putch", SymbolType.VoidFunc, 0);
+        putchFunc.addParameter(new ValueSymbol("c", SymbolType.Int, 0, 0));
+        currentScope.addBuiltInSymbol(putchFunc);
+        
+        FuncSymbol putstrFunc = new FuncSymbol("putstr", SymbolType.VoidFunc, 0);
+        // putstr 参数实际上是 char*，但在 SysY 中我们通常不检查参数，或者视作 void
+        // 这里为了兼容性，可以不加参数检查，或者添加一个 int 参数（如果是作为地址传入）
+        // 不过 putstr 通常接收字符串常量，我们在 Parser 层面处理可能不一样
+        // 但为了 SemanticVisitor 不报错，先加上。
+        putstrFunc.addParameter(new ValueSymbol("str", SymbolType.ConstIntArray, 0, 1)); 
+        currentScope.addBuiltInSymbol(putstrFunc);
+
         FuncSymbol printfFunc = new FuncSymbol("printf", SymbolType.VoidFunc, 0);
         currentScope.addBuiltInSymbol(printfFunc);
 

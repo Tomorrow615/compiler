@@ -6,9 +6,7 @@ import io.github.tomorrow615.compiler.backend.mips.operand.Operand;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsBasicBlock;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsFunction;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * 活跃变量分析
@@ -27,86 +25,148 @@ public class LivenessAnalyzer {
         }
     }
 
+    /**
+     * BitSet-optimized Liveness Analysis
+     */
     public void analyzeFunction(MipsFunction func) {
-        // 1. 计算 Use 和 Def 集合
-        for (MipsBasicBlock block : func.getBlocks()) {
-            computeUseDef(block);
+        // 1. Map all Operands to IDs [0, N)
+        List<Operand> allOperands = collectAllOperands(func);
+        int operandCount = allOperands.size();
+        Map<Operand, Integer> operandToId = new HashMap<>(operandCount);
+        for (int i = 0; i < operandCount; i++) {
+            operandToId.put(allOperands.get(i), i);
         }
 
-        // 2. 计算 LiveIn 和 LiveOut
-        computeLiveInOut(func);
-    }
-
-    /**
-     * 计算基本块的 Use 和 Def 集合
-     * Use[B]: 在块 B 中被使用且在使用前未被 B 定义的变量
-     * Def[B]: 在块 B 中被定义且在定义前未被使用的变量 (严格来说是 Killed 集合)
-     * 更准确的定义:
-     * - Use[B]: 向上暴露的使用 (Upward Exposed Uses)
-     * - Def[B]: 块内定义的变量 (Killed Definitions)
-     */
-    private void computeUseDef(MipsBasicBlock block) {
-        Set<Operand> use = block.getUse();
-        Set<Operand> def = block.getDef();
-        use.clear();
-        def.clear();
-
-        for (MipsInstruction inst : block.getInstructions()) {
-            // 检查 Use
-            for (Operand op : inst.getUse()) {
-                // 如果该变量尚未在这个块中被定义 (即不在 def 集合中)
-                // 那么这是一个“向上暴露的使用”，加入 use 集合
-                if (!def.contains(op)) {
-                    use.add(op);
-                }
-            }
-
-            // 检查 Def
-            for (Operand op : inst.getDef()) {
-                // 加入 def 集合 (Kill)
-                def.add(op);
-            }
-        }
-    }
-
-    /**
-     * 迭代计算 LiveIn 和 LiveOut 集合
-     * 
-     * LiveIn[B] = Use[B] U (LiveOut[B] - Def[B])
-     * LiveOut[B] = U (LiveIn[S]), 其中 S 是 B 的后继
-     */
-    private void computeLiveInOut(MipsFunction func) {
         List<MipsBasicBlock> blocks = func.getBlocks();
+        int blockCount = blocks.size();
+
+        // 2. Pre-compute Use/Def BitSets for each block
+        java.util.BitSet[] useSets = new java.util.BitSet[blockCount];
+        java.util.BitSet[] defSets = new java.util.BitSet[blockCount];
+        java.util.BitSet[] liveInSets = new java.util.BitSet[blockCount];
+        java.util.BitSet[] liveOutSets = new java.util.BitSet[blockCount];
+
+        for (int i = 0; i < blockCount; i++) {
+            useSets[i] = new java.util.BitSet(operandCount);
+            defSets[i] = new java.util.BitSet(operandCount);
+            liveInSets[i] = new java.util.BitSet(operandCount);
+            liveOutSets[i] = new java.util.BitSet(operandCount);
+
+            computeBlockUseDefBitSet(blocks.get(i), useSets[i], defSets[i], operandToId);
+        }
+
+
+        // [Optimization] Pre-compute block indices and successor indices
+        Map<MipsBasicBlock, Integer> blockToId = new HashMap<>(blockCount);
+        for (int i = 0; i < blockCount; i++) {
+            blockToId.put(blocks.get(i), i);
+        }
+
+        int[][] successors = new int[blockCount][];
+        for (int i = 0; i < blockCount; i++) {
+            List<MipsBasicBlock> succs = blocks.get(i).getSuccessors();
+            successors[i] = new int[succs.size()];
+            for (int j = 0; j < succs.size(); j++) {
+                successors[i][j] = blockToId.get(succs.get(j));
+            }
+        }
+
+        // 3. Iterative Dataflow (Backward)
         boolean changed = true;
-        
         while (changed) {
             changed = false;
-            
-            // 逆序遍历有助于加速收敛
-            for (int i = blocks.size() - 1; i >= 0; i--) {
-                MipsBasicBlock block = blocks.get(i);
-                
-                // 1. 计算 LiveOut = Union(LiveIn[S])
-                Set<Operand> newLiveOut = new HashSet<>();
-                for (MipsBasicBlock succ : block.getSuccessors()) {
-                    newLiveOut.addAll(succ.getLiveIn());
+            // Iterate blocks in reverse order for faster convergence
+            for (int i = blockCount - 1; i >= 0; i--) {
+                java.util.BitSet newLiveOut = new java.util.BitSet(operandCount);
+                // MipsBasicBlock block = blocks.get(i); // block unused in optimized loop
+
+                // Union successors' LiveIn using pre-computed indices
+                for (int succIdx : successors[i]) {
+                    newLiveOut.or(liveInSets[succIdx]);
                 }
-                
-                // 2. 计算 LiveIn = Use U (LiveOut - Def)
-                Set<Operand> newLiveIn = new HashSet<>(newLiveOut);
-                newLiveIn.removeAll(block.getDef());
-                newLiveIn.addAll(block.getUse());
-                
-                // 3. 检查是否有变化
-                if (!newLiveIn.equals(block.getLiveIn()) || !newLiveOut.equals(block.getLiveOut())) {
+
+                // LiveIn = Use U (LiveOut - Def)
+                java.util.BitSet newLiveIn = (java.util.BitSet) newLiveOut.clone();
+                newLiveIn.andNot(defSets[i]);
+                newLiveIn.or(useSets[i]);
+
+                // Check for changes
+                if (!newLiveIn.equals(liveInSets[i]) || !newLiveOut.equals(liveOutSets[i])) {
+                    liveInSets[i] = newLiveIn;
+                    liveOutSets[i] = newLiveOut;
                     changed = true;
-                    block.getLiveIn().clear();
-                    block.getLiveIn().addAll(newLiveIn);
-                    
-                    block.getLiveOut().clear();
-                    block.getLiveOut().addAll(newLiveOut);
+                }
+            }
+        }
+
+        // 4. Write back to MipsBasicBlock Sets (for compatibility)
+        for (int i = 0; i < blockCount; i++) {
+            MipsBasicBlock block = blocks.get(i);
+            
+            block.getLiveIn().clear();
+            block.getLiveOut().clear();
+
+            java.util.BitSet in = liveInSets[i];
+            java.util.BitSet out = liveOutSets[i];
+
+            for (int bit = in.nextSetBit(0); bit >= 0; bit = in.nextSetBit(bit + 1)) {
+                block.getLiveIn().add(allOperands.get(bit));
+            }
+            for (int bit = out.nextSetBit(0); bit >= 0; bit = out.nextSetBit(bit + 1)) {
+                block.getLiveOut().add(allOperands.get(bit));
+            }
+        }
+    }
+
+    private java.util.ArrayList<Operand> collectAllOperands(MipsFunction func) {
+        java.util.ArrayList<Operand> list = new java.util.ArrayList<>();
+        Set<Operand> seen = new HashSet<>();
+        
+        for (MipsBasicBlock block : func.getBlocks()) {
+            for (MipsInstruction inst : block.getInstructions()) {
+                for (Operand op : inst.getDef()) {
+                    if (seen.add(op)) list.add(op);
+                }
+                for (Operand op : inst.getUse()) {
+                    if (seen.add(op)) list.add(op);
+                }
+            }
+        }
+        return list;
+    }
+
+    private void computeBlockUseDefBitSet(MipsBasicBlock block, 
+                                          java.util.BitSet use, 
+                                          java.util.BitSet def,
+                                          Map<Operand, Integer> opToId) {
+        // Local calculation, strictly follow standard definition:
+        // Use: Upward exposed uses
+        // Def: Killed definitions
+        
+        // Clear logic handled by new BitSet()
+
+        for (MipsInstruction inst : block.getInstructions()) {
+            // Check Uses FIRST
+            for (Operand op : inst.getUse()) {
+                Integer id = opToId.get(op);
+                if (id != null) {
+                    // If not defined earlier in this block (not in def set yet)
+                    if (!def.get(id)) {
+                        use.set(id);
+                    }
+                }
+            }
+
+            // Then Check Defs
+            for (Operand op : inst.getDef()) {
+                Integer id = opToId.get(op);
+                if (id != null) {
+                    def.set(id);
                 }
             }
         }
     }
+
+    // Deprecated old methods removed for clarity
+    // (computeUseDef, computeLiveInOut)
 }

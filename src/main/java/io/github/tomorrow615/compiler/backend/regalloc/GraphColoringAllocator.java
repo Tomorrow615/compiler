@@ -571,60 +571,79 @@ public class GraphColoringAllocator {
             }
         }
         
-        // 1. Calculate extra space for MEMORY spills only
+        // 1. Calculate extra space using StackManager
+        io.github.tomorrow615.compiler.backend.codegen.StackManager stackManager = func.getStackManager();
+        if (stackManager == null) {
+            throw new RuntimeException("StackManager not linked to MipsFunction: " + func.getName());
+        }
+
+        int oldStackSize = stackManager.getRaOffset(); // RA saved at stackSize
+        int oldFrameSize = stackManager.getFrameSize();
+        
+        // 1. Calculate extra space required for spills
+        // [Refactor] Spill slots are allocated at the BOTTOM of the frame (0 to spillSize)
+        // Existing content (Locals, Arg Slots, RA) is shifted UP by spillSize.
+        int spillCount = memSpillNodes.size();
+        int spillSize = spillCount * 4;
+        // Ensure 8-byte alignment for the spill area
+        if (spillSize % 8 != 0) spillSize += (8 - spillSize % 8);
+
+        // 2. Assign offsets to spill nodes (start from 0)
         Map<Operand, Integer> spilledOffsets = new HashMap<>();
-        int extraSize = 0;
+        int currentSpillOffset = 0;
         for (Operand spill : memSpillNodes) {
-             spilledOffsets.put(spill, extraSize);
-             extraSize += 4;
+             spilledOffsets.put(spill, currentSpillOffset);
+             currentSpillOffset += 4;
         }
-        
-        // Align extraSize to 8 bytes to maintain stack alignment
-        if (extraSize % 8 != 0) {
-            extraSize += (8 - extraSize % 8);
-        }
-        
-        // 2. Patch Stack Offsets (Prologue, Epilogue, and existing Access)
-        if (extraSize > 0) {
+
+        // Since we are inserting at bottom, the new frame size increases by spillSize
+        int extraFrameSize = spillSize;
+
+        // 3. Patch Stack Offsets in existing instructions
+        // We need to shift everything UP by spillSize because $sp moves down by spillSize relative to them
+        if (extraFrameSize > 0) {
             for (MipsBasicBlock block : func.getBlocks()) {
                 List<MipsInstruction> newInsts = new ArrayList<>();
                 for (MipsInstruction inst : block.getInstructions()) {
                     MipsInstruction patched = inst;
                     
                     if (inst instanceof MipsBinary bin && bin.getImm() != null) {
-                        // Check for subu $sp, $sp, frameSize (Prologue)
+                        // Prologue: subu $sp, $sp, frameSize
                         if (bin.getOp().equals("subu") && 
                             bin.getRd() == MipsRegister.SP && 
                             bin.getRs() == MipsRegister.SP) {
-                            
-                            patched = new MipsBinary("subu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + extraSize);
+                            patched = new MipsBinary("subu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + extraFrameSize);
                         }
-                        // Check for addu $sp, $sp, frameSize (Epilogue)
+                        // Epilogue: addu $sp, $sp, frameSize
                         else if (bin.getOp().equals("addu") && 
                                  bin.getRd() == MipsRegister.SP && 
                                  bin.getRs() == MipsRegister.SP) {
-                            
-                            patched = new MipsBinary("addu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + extraSize);
+                            patched = new MipsBinary("addu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + extraFrameSize);
                         }
-                        // Check for addiu $t, $sp, offset (Address calculation)
+                        // Patch addiu $sp, offset (address calculation)
                         else if ((bin.getOp().equals("addiu") || bin.getOp().equals("addi")) && 
                                  bin.getRs() == MipsRegister.SP) {
-                             
-                            patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + extraSize);
+                             // All existing stack objects are shifted up
+                             patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + extraFrameSize);
                         }
                     } else if (inst instanceof MipsLoadStore ls) {
-                        // Check base is SP
+                        // Patch loads/stores: lw/sw reg, offset($sp)
                         if (ls.getBase() == MipsRegister.SP) {
-                            patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + extraSize);
+                            // All existing stack access (Locals, Args, RA) needs to be shifted up
+                            patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + extraFrameSize);
                         }
                     }
-                    
                     newInsts.add(patched);
                 }
                 block.getInstructions().clear();
                 block.getInstructions().addAll(newInsts);
             }
+
         }
+        
+        // 3. Rewrite Instructions with Spills
+        // Algorithm: For each instruction, check Def and Use for spilled nodes.
+        // Insert Loads before Use, Stores after Def.
         
         // 3. Rewrite Instructions with Spills
         // Algorithm: For each instruction, check Def and Use for spilled nodes.
@@ -653,21 +672,18 @@ public class GraphColoringAllocator {
                                     loadsToInsert.add(new MipsLi(temp, li.getImm()));
                                 } else if (defInst instanceof MipsBinary bin) { // Addiu $sp
                                     // Make sure to add extraSize to the offset if we patched stack!
-                                    // But wait, the defining instruction 'bin' was captured from 'oldInsts' (or earlier).
-                                    // If we patched stack in Step 2, 'definition' map still holds OLD instructions references 
-                                    // (or references that are now detached from block but have old values??).
-                                    // Actually Step 2 modified instructions IN PLACE or REPLACED them in the list.
-                                    // But 'definition' map values are references to objects.
-                                    // If Step 2 created NEW objects (e.g. `patched = new MipsBinary...`), then `definition` map holds OLD objects.
-                                    // Original `addiu $t, $sp, imm` for 'use' might be dead or replaced.
-                                    // But the logic of Remat is simple: we just need the Immunity and Op.
-                                    // If it was `addiu $t, $sp, 10`, and we increased stack by 4, correct value should be `addiu $t, $sp, 14`.
-                                    // So we simply take old Immediate + extraSize.
+                                    // Use extraFrameSize calculated from StackManager
                                     int oldImm = bin.getImm();
-                                    loadsToInsert.add(new MipsBinary(bin.getOp(), temp, MipsRegister.SP, oldImm + extraSize));
+                                    // [Fix] Remat needs same patching as original code
+                                    loadsToInsert.add(new MipsBinary(bin.getOp(), temp, MipsRegister.SP, oldImm + extraFrameSize));
                                 }
                             } else {
                                 // MEM SPILL: Insert Load
+                                // Use offsets from `spilledOffsets` map (0...spillSize)
+                                // These are ALREADY correct relative to the new $sp.
+                                if (!spilledOffsets.containsKey(use)) {
+                                     throw new RuntimeException("Spill offset not found for: " + use);
+                                }
                                 int offset = spilledOffsets.get(use);
                                 loadsToInsert.add(new MipsLoadStore(MipsLoadStore.Type.LW, temp, MipsRegister.SP, offset));
                             }
@@ -695,10 +711,7 @@ public class GraphColoringAllocator {
 
                 // Process Defs
                 // For Remat nodes: If we define a Remat node, we perform NO STORE.
-                // The instruction remains (defining a register that is effectively dead immediately, unless used in same block? 
-                // No, we replaced downstream uses with new temps).
-                // So we do nothing for Remat Defs (except maybe replace Def with new temp to be clean? 
-                // but Chaitin says just leave it, it's dead).
+                // The instruction remains.
                 // For Mem nodes: Insert Store.
                 
                 Map<Operand, Operand> defReplacements = new HashMap<>();
@@ -709,12 +722,14 @@ public class GraphColoringAllocator {
                             defReplacements.put(def, temp);
                             inst.replaceDef(def, temp);
                             
+                            if (!spilledOffsets.containsKey(def)) {
+                                 throw new RuntimeException("Spill offset not found for: " + def);
+                            }
                             int offset = spilledOffsets.get(def);
+                            // Store to spill slot
                             newInsts.add(new MipsLoadStore(MipsLoadStore.Type.SW, temp, MipsRegister.SP, offset));
                         } else {
                             // Remat node defined: Do nothing (Implicitly dead)
-                            // Optionally we can replace def with a dummy temp to ensure unique names
-                            // But keeping old name is fine, it will be re-analyzed next round.
                         }
                     }
                 }
@@ -816,6 +831,23 @@ public class GraphColoringAllocator {
             }
         }
 
+        // [Fix] Scan ALL instructions for explicit Physical Register usage
+        // This covers cases where MipsGenerator manually uses $s0 etc.
+        for (MipsBasicBlock block : func.getBlocks()) {
+            for (MipsInstruction inst : block.getInstructions()) {
+                for (Operand def : inst.getDef()) {
+                    if (def instanceof MipsRegister reg && isCalleeSaved(reg)) {
+                        usedS.add(reg);
+                    }
+                }
+                for (Operand use : inst.getUse()) {
+                    if (use instanceof MipsRegister reg && isCalleeSaved(reg)) {
+                        usedS.add(reg);
+                    }
+                }
+            }
+        }
+
         if (!usedS.isEmpty()) {
             List<MipsRegister> sortedS = new ArrayList<>(usedS);
             sortedS.sort(Comparator.comparingInt(Enum::ordinal));
@@ -846,8 +878,9 @@ public class GraphColoringAllocator {
                         else if (bin.getOp().equals("addu") && bin.getRd() == MipsRegister.SP && bin.getRs() == MipsRegister.SP) {
                             patched = new MipsBinary("addu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + csrSize);
                         }
-                        // Address Calc: addiu $t, $sp, offset
-                        else if ((bin.getOp().equals("addiu") || bin.getOp().equals("addi")) && bin.getRs() == MipsRegister.SP) {
+                        // [Fix] Restore CSR addiu patching (unconditional shift)
+                        else if ((bin.getOp().equals("addiu") || bin.getOp().equals("addi")) && 
+                                 bin.getRs() == MipsRegister.SP) {
                             patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + csrSize);
                         }
                     } else if (inst instanceof MipsLoadStore ls) {

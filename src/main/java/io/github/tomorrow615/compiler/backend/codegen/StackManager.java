@@ -31,47 +31,46 @@ public class StackManager {
     public StackManager(Function function) {
         this.valueOffsetMap = new HashMap<>();
         
-        // 1. 计算栈底预留空间 (用于 Phi 临时存储 和 调用参数传递)
-        int maxPhiCount = 0;
-        int maxCallArgs = 0;
+        // 1. [核心修改] 扫描所有 Call 指令，计算最大的栈参数空间需求
+        int maxCallStackArgs = 0;
         for (BasicBlock bb : function.getBasicBlocks()) {
-            int phiCount = 0;
             for (Instruction inst : bb.getInstructions()) {
-                if (inst instanceof PhiInst) {
-                    phiCount++;
-                } else if (inst instanceof CallInst call) {
-                    // 调用参数数量 (超过4个的需要栈传递)
-                    int argCount = call.getOperands().size() - 1; // -1 去掉 callee
-                    if (argCount > 4) {
-                        maxCallArgs = Math.max(maxCallArgs, argCount - 4);
+                if (inst instanceof CallInst call) {
+                    // 超过 4 个的参数需要栈传递
+                    int argsCount = call.getArguments().size();
+                    if (argsCount > 4) {
+                        maxCallStackArgs = Math.max(maxCallStackArgs, argsCount - 4);
                     }
                 }
             }
-            maxPhiCount = Math.max(maxPhiCount, phiCount);
         }
         
-        // 预留空间：max(Phi数量, 超过4个的调用参数, 4) * 4 字节
-        this.bottomReserve = Math.max(Math.max(maxPhiCount, maxCallArgs), 4) * 4;
-        this.stackSize = bottomReserve;  // 从预留区之后开始分配
-        
-        // 2. 为函数参数分配栈空间
-        for (Argument arg : function.getArguments()) {
-            allocSpace(arg, 4);
+        // 预留空间：每个参数 4 字节
+        int reservedSize = maxCallStackArgs * 4;
+        // 保持 8 字节对齐 (MIPS 栈对齐要求)
+        if (reservedSize % 8 != 0 && reservedSize > 0) {
+            reservedSize += (8 - reservedSize % 8);
         }
 
-        // 3. 为所有非 Void 指令分配栈空间
+        // 栈从预留区之后开始分配局部变量
+        // 0 ~ reservedSize-1 : 留给 call 的参数使用
+        // reservedSize ~ ... : 局部变量和当前函数参数
+        this.stackSize = reservedSize;
+
+        // 2. 为局部变量 (AllocaInst) 分配空间
         for (BasicBlock bb : function.getBasicBlocks()) {
             for (Instruction inst : bb.getInstructions()) {
-                if (!(inst.getType() instanceof VoidType)) {
-                    // AllocaInst 需要分配其 allocatedType 的大小
-                    if (inst instanceof AllocaInst alloca) {
-                        int size = calculateTypeSize(alloca.getAllocatedType());
-                        allocSpace(inst, size);
-                    } else {
-                        allocSpace(inst, 4);
-                    }
+                if (inst instanceof AllocaInst alloca) {
+                    int size = calculateTypeSize(alloca.getAllocatedType());
+                    allocSpace(inst, size);
                 }
             }
+        }
+
+        // 3. 为参数 (Arguments) 分配空间 (Incoming Args)
+        // MipsGenerator 会把传入的参数 store 到这些位置
+        for (Argument arg : function.getArguments()) {
+            allocSpace(arg, 4);
         }
     }
 
@@ -87,18 +86,33 @@ public class StackManager {
         return 4;
     }
 
-    private void allocSpace(Value value, int size) {
-        this.valueOffsetMap.put(value, stackSize);
+    // 分配空间并返回 offset
+    public int allocSpace(Value value, int size) {
+        // 简单的线性分配：栈底向上增长
+        valueOffsetMap.put(value, stackSize);
+        int offset = stackSize;
         // 确保 4 字节对齐
         if (size < 4) size = 4;
         stackSize += size;
+        return offset;
     }
 
+    // 获取偏移量 (相对于当前 Frame 的底部，不包含动态 Call 区域)
     public int getOffset(Value value) {
         if (!valueOffsetMap.containsKey(value)) {
-            throw new RuntimeException("StackManager: Value not allocated in stack: " + value);
+            throw new RuntimeException("StackManager: Value not allocated in stack (may be VirtualRegister): " + value);
         }
         return valueOffsetMap.get(value);
+    }
+    
+    /**
+     * 动态分配溢出槽（由寄存器分配器在溢出时调用）
+     * @return 新分配的栈偏移量
+     */
+    public int allocateSpillSlot() {
+        int offset = stackSize;
+        stackSize += 4;
+        return offset;
     }
 
     /**

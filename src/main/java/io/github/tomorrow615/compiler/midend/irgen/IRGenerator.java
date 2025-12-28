@@ -30,6 +30,9 @@ public class IRGenerator {
     }
 
     public Module generate() {
+        // [Fix] 初始化内置函数的 LLVM 定义 (declare)
+        initializeBuiltinFunctions();
+
         for (DeclNode decl : astRoot.getDecls()) {
             visitDecl(decl);
         }
@@ -38,6 +41,30 @@ public class IRGenerator {
         }
         visitMainFuncDef(astRoot.getMainFuncDef());
         return context.getModule();
+    }
+
+    private void initializeBuiltinFunctions() {
+        SymbolTable globalScope = context.getCurrentMetadataScope();
+        
+        registerLibFunc(globalScope, "getint", IntegerType.i32);
+        registerLibFunc(globalScope, "getch", IntegerType.i32);
+        registerLibFunc(globalScope, "putint", VoidType.get(), IntegerType.i32);
+        registerLibFunc(globalScope, "putch", VoidType.get(), IntegerType.i32);
+        registerLibFunc(globalScope, "putstr", VoidType.get(), new PointerType(IntegerType.i8));
+        registerLibFunc(globalScope, "printf", VoidType.get()); // printf 通常是变参，这里简化处理，反正只用于 declare
+    }
+
+    private void registerLibFunc(SymbolTable scope, String name, Type retType, Type... paramTypes) {
+        Symbol symbol = scope.lookup(name);
+        if (symbol instanceof FuncSymbol funcSymbol) {
+            List<Type> params = new ArrayList<>();
+            for (Type t : paramTypes) params.add(t);
+            
+            FunctionType funcType = new FunctionType(retType, params);
+            Function function = new Function(funcType, "@" + name);
+            context.getModule().addFunction(function); // 只是 declare，没有 BasicBlock
+            funcSymbol.setLlvmValue(function);
+        }
     }
 
     private void visitFuncDef(FuncDefNode node) {

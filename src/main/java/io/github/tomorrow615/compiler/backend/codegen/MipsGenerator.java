@@ -167,6 +167,7 @@ public class MipsGenerator {
 
         // 2. 栈帧分析 (Pre-Scan)
         StackManager stackManager = new StackManager(func);
+        mipsFunc.setStackManager(stackManager); // [Fix] 绑定 StackManager
 
         // 3. 构建函数序言 (Prologue) -> 放入入口基本块
         // 我们创建一个名为 "funcName_entry" 的 MipsBasicBlock
@@ -199,11 +200,13 @@ public class MipsGenerator {
                 // 被调用者需要从 frameSize + (i-4)*4 处读取 (因为 SP 已经下移了 frameSize)
                 int callerOffset = frameSize + (i - 4) * 4;
 
-                // 1. 从栈中取出参数值 -> $t0
-                entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, MipsRegister.T0, MipsRegister.SP, callerOffset));
-
+                // [修正] 使用 VirtualRegister 避免与分配器冲突
+                io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister temp = 
+                    new io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister();
+                // 1. 从栈中取出参数值 -> VReg
+                entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, temp, MipsRegister.SP, callerOffset));
                 // 2. 存入当前栈帧分配的局部变量位置 -> offset($sp)
-                entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.T0, MipsRegister.SP, offset));
+                entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, temp, MipsRegister.SP, offset));
             }
         }
 
@@ -216,14 +219,16 @@ public class MipsGenerator {
             entryBlock.addInstruction(new MipsBranch("j", firstBlockLabel));
         }
 
-        // [修改] 4. 翻译函数体 (根据优化等级选择翻译器)
-        // 注意：这里需要引入 Config 类，或者直接硬编码 (这里假设 Config 在 util 包下)
-        if (io.github.tomorrow615.compiler.util.Config.MIPS_OPTIMIZATION_LEVEL >= 1) {
-            OptimizedInstTranslator translator = new OptimizedInstTranslator(stackManager, mipsFunc);
-            translator.translate(func);
-        } else {
-            InstTranslator translator = new InstTranslator(stackManager, mipsFunc);
-            translator.translate(func);
-        }
+        // [Phase 3] 暂时禁用 OptimizedInstTranslator
+        // 因为 StackManager 已重构，不再为临时值预分配栈空间
+        // OptimizedInstTranslator 依赖旧行为，会崩溃
+        // TODO: 重构 OptimizedInstTranslator 或删除
+        // if (io.github.tomorrow615.compiler.util.Config.MIPS_OPTIMIZATION_LEVEL >= 1) {
+        //     OptimizedInstTranslator translator = new OptimizedInstTranslator(stackManager, mipsFunc);
+        //     translator.translate(func);
+        // } else {
+        InstTranslator translator = new InstTranslator(stackManager, mipsFunc);
+        translator.translate(func);
+        // }
     }
 }
