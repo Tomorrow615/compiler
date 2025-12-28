@@ -1,10 +1,12 @@
 package io.github.tomorrow615.compiler.backend.mips;
 
+import io.github.tomorrow615.compiler.backend.mips.operand.Operand;
+
 /**
  * MIPS 32个物理寄存器枚举
  * 包含编号和汇编名称
  */
-public enum MipsRegister {
+public enum MipsRegister implements Operand {
     // 常量 0
     ZERO("$zero", 0),
     // 汇编器保留
@@ -47,5 +49,17 @@ public enum MipsRegister {
     @Override
     public String toString() {
         return name;
+    }
+    
+    // ========== Operand 接口实现 ==========
+    
+    @Override
+    public String toAsm() {
+        return name;
+    }
+    
+    @Override
+    public boolean isPhysical() {
+        return true;
     }
 }

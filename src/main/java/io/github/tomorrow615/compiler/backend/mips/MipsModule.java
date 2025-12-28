@@ -31,6 +31,10 @@ public class MipsModule {
         this.textSection.add(function);
     }
 
+    public List<MipsFunction> getFunctions() {
+        return textSection;
+    }
+
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();

@@ -1,9 +1,10 @@
 package io.github.tomorrow615.compiler.backend.codegen;
 
+import io.github.tomorrow615.compiler.backend.regalloc.GraphColoringAllocator;
 import io.github.tomorrow615.compiler.backend.mips.MipsModule;
 import io.github.tomorrow615.compiler.backend.mips.MipsRegister;
 import io.github.tomorrow615.compiler.backend.mips.assembly.*;
-import io.github.tomorrow615.compiler.backend.mips.assembly.MipsBranch; // 暂时可能用不到，先引入防止报错
+import io.github.tomorrow615.compiler.backend.mips.assembly.MipsBranch;
 import io.github.tomorrow615.compiler.backend.mips.assembly.MipsInstruction;
 import io.github.tomorrow615.compiler.backend.mips.assembly.MipsLoadStore;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsBasicBlock;
@@ -13,7 +14,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.ArrayType;
 import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
-import io.github.tomorrow615.compiler.midend.llvm.value.Constant; // 需引入
+import io.github.tomorrow615.compiler.midend.llvm.value.Constant;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,8 +39,12 @@ public class MipsGenerator {
         // 2. 生成代码段 (.text)
         generateFunctions();
 
-        // [新增] 3. 生成 SysY 运行库函数 (getint, putint 等)
+        // 3. 生成 SysY 运行库函数 (getint, putint 等)
         generateSysYLibrary();
+        
+        // [新增] 4. 执行寄存器分配 (NaiveAllocator for Phase 1)
+        new GraphColoringAllocator(mipsModule).allocate();
+        // new io.github.tomorrow615.compiler.backend.regalloc.NaiveAllocator(mipsModule).allocate();
 
         return mipsModule;
     }
@@ -212,6 +217,7 @@ public class MipsGenerator {
         }
 
         // [修改] 4. 翻译函数体 (根据优化等级选择翻译器)
+        // 注意：这里需要引入 Config 类，或者直接硬编码 (这里假设 Config 在 util 包下)
         if (io.github.tomorrow615.compiler.util.Config.MIPS_OPTIMIZATION_LEVEL >= 1) {
             OptimizedInstTranslator translator = new OptimizedInstTranslator(stackManager, mipsFunc);
             translator.translate(func);
