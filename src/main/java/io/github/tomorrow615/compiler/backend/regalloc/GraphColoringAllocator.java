@@ -62,6 +62,8 @@ public class GraphColoringAllocator {
     private final Set<Operand> coloredNodes = new HashSet<>();
     // 9. selectStack: 包含从图中删除的节点 (Color阶段弹出)
     private final Stack<Operand> selectStack = new Stack<>();
+    // [Performance Fix] O(1) lookup set for selectStack
+    private final Set<Operand> selectStackSet = new HashSet<>();
 
     // Move Sets
     // 1. coalescedMoves: 已合并的移动
@@ -158,7 +160,8 @@ public class GraphColoringAllocator {
         spilledNodes.clear();
         coalescedNodes.clear();
         coloredNodes.clear();
-        selectStack.clear(); // Use standard stack methods
+        selectStack.clear();
+        selectStackSet.clear(); // [Performance Fix]
 
         coalescedMoves.clear();
         constrainedMoves.clear();
@@ -277,10 +280,13 @@ public class GraphColoringAllocator {
     
     // Get adjacent nodes (excluding those on stack or coalesced)
     private Set<Operand> getAdj(Operand u) {
-        Set<Operand> adj = new HashSet<>(graph.getAdj(u));
-        adj.removeAll(selectStack);
-        adj.removeAll(coalescedNodes); // Is this correct? Coalesced nodes are effectively merged.
-        // Usually: adj = adjList[u] \ (selectStack U coalescedNodes)
+        Set<Operand> adj = new HashSet<>();
+        for (Operand neighbor : graph.getAdj(u)) {
+            // [Performance Fix] Use O(1) HashSet lookup instead of O(N) Stack scan
+            if (!selectStackSet.contains(neighbor) && !coalescedNodes.contains(neighbor)) {
+                adj.add(neighbor);
+            }
+        }
         return adj;
     }
 
@@ -288,6 +294,7 @@ public class GraphColoringAllocator {
         Operand n = simplifyWorklist.iterator().next();
         simplifyWorklist.remove(n);
         selectStack.push(n);
+        selectStackSet.add(n); // [Performance Fix]
         
         for (Operand m : getAdj(n)) {
             decrementDegree(m);
@@ -479,6 +486,7 @@ public class GraphColoringAllocator {
     private void assignColors() {
         while (!selectStack.isEmpty()) {
             Operand n = selectStack.pop();
+            selectStackSet.remove(n); // [Performance Fix]
             Set<MipsRegister> usedColors = new HashSet<>();
             
             for (Operand neighbor : graph.getAdj(n)) {

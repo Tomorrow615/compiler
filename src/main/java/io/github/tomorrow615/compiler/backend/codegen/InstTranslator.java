@@ -409,8 +409,14 @@ public class InstTranslator {
     /**
      * Phi 降级逻辑 (Parallel Copy):
      * Phi 节点的值通过 Move 指令传递到目标 VReg，不再使用栈
+     * 
+     * [Critical Fix] 使用安全的 Parallel Copy 算法处理循环依赖
+     * 例如: a = phi(b), b = phi(a) 需要临时寄存器来破环
      */
     private void processPhiNodes(BasicBlock targetBlock) {
+        // 1. 收集所有需要的 Copy 对 (src -> dest)
+        java.util.List<Operand[]> copies = new java.util.ArrayList<>();
+        
         for (Instruction inst : targetBlock.getInstructions()) {
             if (!(inst instanceof PhiInst phi)) {
                 break; // Phi 都在开头
@@ -429,16 +435,118 @@ public class InstTranslator {
             }
 
             if (incomingValue != null) {
-                // [修正] 使用 computeIfAbsent 获取/创建 Phi 的目标 VReg
-                // Phi 指令本身对应一个 VReg，所有前驱块都 Move 到这个 VReg
                 Operand src = getOperand(incomingValue);
                 Operand dest = valueMap.computeIfAbsent(phi, k -> new VirtualRegister());
                 
-                // 生成 Move 指令完成 Parallel Copy
-                currentMipsBlock.addInstruction(new MipsMove(dest, src));
+                // 如果 src == dest，跳过（自赋值）
+                if (!src.equals(dest)) {
+                    copies.add(new Operand[]{src, dest});
+                }
             }
         }
+        
+        // 2. 使用拓扑排序 + 破环算法生成安全的 Move 序列
+        // 算法：优先处理不被其他 Copy 作为源的目标；如果存在环，用临时变量破环
+        
+        java.util.Set<Operand> pending = new java.util.HashSet<>();
+        java.util.Map<Operand, Operand> srcMap = new java.util.HashMap<>(); // dest -> src
+        for (Operand[] copy : copies) {
+            Operand src = copy[0];
+            Operand dest = copy[1];
+            srcMap.put(dest, src);
+            pending.add(dest);
+        }
+        
+        // 记录哪些 Operand 是某个 Copy 的 src
+        java.util.Set<Operand> isSrcOfSomeone = new java.util.HashSet<>();
+        for (Operand[] copy : copies) {
+            isSrcOfSomeone.add(copy[0]);
+        }
+        
+        java.util.List<MipsInstruction> moveInsts = new java.util.ArrayList<>();
+        
+        while (!pending.isEmpty()) {
+            // 找一个 dest，其 dest 不是任何其他未处理 Copy 的 src
+            Operand safeToEmit = null;
+            for (Operand dest : pending) {
+                // 检查 dest 是否是某个未处理 Copy 的 src
+                boolean isBlockedBySomeone = false;
+                for (Operand otherDest : pending) {
+                    if (!otherDest.equals(dest)) {
+                        Operand otherSrc = srcMap.get(otherDest);
+                        if (otherSrc.equals(dest)) {
+                            isBlockedBySomeone = true;
+                            break;
+                        }
+                    }
+                }
+                if (!isBlockedBySomeone) {
+                    safeToEmit = dest;
+                    break;
+                }
+            }
+            
+            if (safeToEmit != null) {
+                // 可以安全地生成 move dest, src
+                Operand src = srcMap.get(safeToEmit);
+                moveInsts.add(new MipsMove(safeToEmit, src));
+                pending.remove(safeToEmit);
+            } else {
+                // 所有剩余的都形成环！使用临时变量破环
+                // 选择一个环中的节点，保存其值到 temp
+                Operand cycleNode = pending.iterator().next();
+                Operand cycleSrc = srcMap.get(cycleNode);
+                
+                // 创建临时寄存器保存环中某个节点的原始值
+                VirtualRegister temp = new VirtualRegister();
+                moveInsts.add(new MipsMove(temp, cycleNode)); // 保存 cycleNode 的旧值
+                
+                // 处理环：从 cycleNode 开始，沿着 src 链条走
+                Operand current = cycleNode;
+                while (true) {
+                    Operand src = srcMap.get(current);
+                    if (src.equals(cycleNode)) {
+                        // 环的最后一步：使用 temp 作为 src
+                        moveInsts.add(new MipsMove(current, temp));
+                        pending.remove(current);
+                        break;
+                    } else {
+                        moveInsts.add(new MipsMove(current, src));
+                        pending.remove(current);
+                        // 移动到环的下一个节点
+                        // 找到以 src 为 dest 的 copy
+                        boolean found = false;
+                        for (Operand nextDest : new java.util.ArrayList<>(pending)) {
+                            if (srcMap.get(nextDest) != null && nextDest.equals(src)) {
+                                // Wait, we need to find dest whose src is current's src? No.
+                                // Actually we need: find another copy where dest == src (current src becomes next dest)
+                            }
+                            // Simpler: find a copy where dest = src  (the one that uses our current dest as its src)
+                            if (srcMap.containsKey(src) && pending.contains(src)) {
+                                current = src;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            // Edge case: src is not in pending (already processed or not a dest)
+                            // This means cycleNode's src chain terminates.
+                            // But we entered here because there's a cycle, so this shouldn't happen.
+                            // Fallback: just break
+                            break;
+                        }
+                        current = src; // Move to next node in cycle
+                    }
+                }
+            }
+        }
+        
+        // 3. 添加所有 Move 指令
+        for (MipsInstruction move : moveInsts) {
+            currentMipsBlock.addInstruction(move);
+        }
     }
+
 
     /**
      * [Phase 2 重构] 获取 Value 对应的 Operand
