@@ -140,6 +140,7 @@ public class Compiler {
                 runPass(llvmModule, new AlgebraicSimplification());
                 runPass(llvmModule, new ArithmeticOptimization());
                 runPass(llvmModule, new LICM());
+                runPass(llvmModule, new StrengthReduction());  // 强度削减：乘法转累加
                 runPass(llvmModule, new GVN());
                 runPass(llvmModule, new SimplifyCFG());
                 runPass(llvmModule, new DeadCodeElimination());

@@ -9,6 +9,7 @@ import io.github.tomorrow615.compiler.midend.llvm.value.*;
 
 import io.github.tomorrow615.compiler.backend.mips.operand.Operand;
 import io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister;
+import io.github.tomorrow615.compiler.midend.optimize.MagicNumber;
 
 import java.util.HashMap;
 import java.util.List;
@@ -152,6 +153,26 @@ public class InstTranslator {
         Operand rhs = getOperand(inst.getRhs());
         VirtualRegister dest = new VirtualRegister();
 
+        // [Magic Number 优化] 常量除法优化
+        if (inst.getOp() == BinaryOpInst.OpCode.SDIV && inst.getRhs() instanceof ConstantInt constDiv) {
+            int divisor = constDiv.getValue();
+            if (divisor > 1 && !isPowerOfTwo(divisor)) {
+                if (translateDivByMagicNumber(inst, lhs, divisor)) {
+                    return;
+                }
+            }
+        }
+
+        // [Magic Number 优化] 常量取模优化
+        if (inst.getOp() == BinaryOpInst.OpCode.SREM && inst.getRhs() instanceof ConstantInt constMod) {
+            int divisor = constMod.getValue();
+            if (divisor > 1 && !isPowerOfTwo(divisor)) {
+                if (translateRemByMagicNumber(inst, lhs, divisor)) {
+                    return;
+                }
+            }
+        }
+
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV) {
             currentMipsBlock.addInstruction(new MipsBinary("div", lhs, rhs));
             currentMipsBlock.addInstruction(new MipsBinary("mflo", dest));
@@ -175,6 +196,133 @@ public class InstTranslator {
         }
         // [Phase 2 关键]将结果存入 valueMap，而非立即写回栈
         valueMap.put(inst, dest);
+    }
+
+    /**
+     * 使用 Magic Number 方法翻译常量除法
+     * x / d = (x * m) >> (32 + s) + 符号修正
+     * 
+     * @return true 如果成功优化，false 则回退到普通除法
+     */
+    private boolean translateDivByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {
+        MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
+        if (magic == null) {
+            return false;
+        }
+
+        // 如果乘数超过 32 位有符号范围，暂不处理
+        if (magic.multiplier > Integer.MAX_VALUE || magic.multiplier < Integer.MIN_VALUE) {
+            return false;
+        }
+
+        int m = (int) magic.multiplier;
+        
+        // 需要多个临时虚拟寄存器
+        VirtualRegister vLhs = new VirtualRegister();
+        VirtualRegister vMagic = new VirtualRegister();
+        VirtualRegister vHi = new VirtualRegister();
+        VirtualRegister vShifted = new VirtualRegister();
+        VirtualRegister vSign = new VirtualRegister();
+        VirtualRegister dest = new VirtualRegister();
+        
+        // 1. 复制 lhs 到虚拟寄存器（可能已经是 VReg，但为安全起见）
+        currentMipsBlock.addInstruction(new MipsMove(vLhs, lhsOp));
+        
+        // 2. 加载 Magic Number
+        currentMipsBlock.addInstruction(new MipsLi(vMagic, m));
+        
+        // 3. mult (有符号乘法)
+        currentMipsBlock.addInstruction(new MipsBinary("mult", vLhs, vMagic));
+        
+        // 4. mfhi (取高 32 位)
+        currentMipsBlock.addInstruction(new MipsBinary("mfhi", vHi));
+        
+        // 5. 如果需要加法修正
+        if (magic.needsAdd) {
+            currentMipsBlock.addInstruction(new MipsBinary("addu", vHi, vHi, vLhs));
+        }
+        
+        // 6. 算术右移 shift 位
+        if (magic.shift > 0) {
+            currentMipsBlock.addInstruction(new MipsBinary("sra", vShifted, vHi, magic.shift));
+        } else {
+            currentMipsBlock.addInstruction(new MipsMove(vShifted, vHi));
+        }
+        
+        // 7. 符号修正：sign = x >> 31
+        currentMipsBlock.addInstruction(new MipsBinary("sra", vSign, vLhs, 31));
+        
+        // 8. result = shifted - sign
+        currentMipsBlock.addInstruction(new MipsBinary("subu", dest, vShifted, vSign));
+        
+        valueMap.put(inst, dest);
+        return true;
+    }
+
+    /**
+     * 使用 Magic Number 方法翻译常量取模
+     * 公式: a % b = a - (a / b) * b
+     * 
+     * @return true 如果成功优化，false 则回退到普通取模
+     */
+    private boolean translateRemByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {
+        MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
+        if (magic == null) {
+            return false;
+        }
+
+        if (magic.multiplier > Integer.MAX_VALUE || magic.multiplier < Integer.MIN_VALUE) {
+            return false;
+        }
+
+        int m = (int) magic.multiplier;
+        
+        // 临时虚拟寄存器
+        VirtualRegister vLhs = new VirtualRegister();
+        VirtualRegister vMagic = new VirtualRegister();
+        VirtualRegister vHi = new VirtualRegister();
+        VirtualRegister vShifted = new VirtualRegister();
+        VirtualRegister vSign = new VirtualRegister();
+        VirtualRegister vQuot = new VirtualRegister();
+        VirtualRegister vDivisor = new VirtualRegister();
+        VirtualRegister vQuotMulDiv = new VirtualRegister();
+        VirtualRegister dest = new VirtualRegister();
+        
+        // 1. 保存 lhs 副本
+        currentMipsBlock.addInstruction(new MipsMove(vLhs, lhsOp));
+        
+        // 2-8. 计算 quotient = a / b (与 div 优化相同)
+        currentMipsBlock.addInstruction(new MipsLi(vMagic, m));
+        currentMipsBlock.addInstruction(new MipsBinary("mult", vLhs, vMagic));
+        currentMipsBlock.addInstruction(new MipsBinary("mfhi", vHi));
+        
+        if (magic.needsAdd) {
+            currentMipsBlock.addInstruction(new MipsBinary("addu", vHi, vHi, vLhs));
+        }
+        
+        if (magic.shift > 0) {
+            currentMipsBlock.addInstruction(new MipsBinary("sra", vShifted, vHi, magic.shift));
+        } else {
+            currentMipsBlock.addInstruction(new MipsMove(vShifted, vHi));
+        }
+        
+        currentMipsBlock.addInstruction(new MipsBinary("sra", vSign, vLhs, 31));
+        currentMipsBlock.addInstruction(new MipsBinary("subu", vQuot, vShifted, vSign));
+        // 现在 vQuot = a / b
+        
+        // 9. 计算 quotient * divisor
+        currentMipsBlock.addInstruction(new MipsLi(vDivisor, divisor));
+        currentMipsBlock.addInstruction(new MipsBinary("mul", vQuotMulDiv, vQuot, vDivisor));
+        
+        // 10. 计算 remainder = a - quotient * divisor
+        currentMipsBlock.addInstruction(new MipsBinary("subu", dest, vLhs, vQuotMulDiv));
+        
+        valueMap.put(inst, dest);
+        return true;
+    }
+
+    private boolean isPowerOfTwo(int n) {
+        return n > 0 && (n & (n - 1)) == 0;
     }
 
     private void translateLoad(LoadInst inst) {

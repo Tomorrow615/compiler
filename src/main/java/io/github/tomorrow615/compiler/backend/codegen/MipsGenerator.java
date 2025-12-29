@@ -42,9 +42,11 @@ public class MipsGenerator {
         // 3. 生成 SysY 运行库函数 (getint, putint 等)
         generateSysYLibrary();
         
-        // [新增] 4. 执行寄存器分配 (NaiveAllocator for Phase 1)
+        // 4. 执行寄存器分配 (图着色分配器)
         new GraphColoringAllocator(mipsModule).allocate();
-        // new io.github.tomorrow615.compiler.backend.regalloc.NaiveAllocator(mipsModule).allocate();
+        
+        // 5. 窥孔优化 (寄存器分配后)
+        new PeepholeOptimizer(mipsModule).optimize();
 
         return mipsModule;
     }
@@ -211,24 +213,14 @@ public class MipsGenerator {
         }
 
         // 3.4 跳转到函数体的第一个基本块
-        // OptimizedInstTranslator 会从 LLVM 的 entry 块开始创建 MIPS 块
-        // 我们需要从 Prologue 跳转过去
         if (!func.getBasicBlocks().isEmpty()) {
             BasicBlock firstLLVMBlock = func.getBasicBlocks().get(0);
             String firstBlockLabel = funcName + "_" + firstLLVMBlock.getName();
             entryBlock.addInstruction(new MipsBranch("j", firstBlockLabel));
         }
 
-        // [Phase 3] 暂时禁用 OptimizedInstTranslator
-        // 因为 StackManager 已重构，不再为临时值预分配栈空间
-        // OptimizedInstTranslator 依赖旧行为，会崩溃
-        // TODO: 重构 OptimizedInstTranslator 或删除
-        // if (io.github.tomorrow615.compiler.util.Config.MIPS_OPTIMIZATION_LEVEL >= 1) {
-        //     OptimizedInstTranslator translator = new OptimizedInstTranslator(stackManager, mipsFunc);
-        //     translator.translate(func);
-        // } else {
+        // 翻译函数体
         InstTranslator translator = new InstTranslator(stackManager, mipsFunc);
         translator.translate(func);
-        // }
     }
 }
