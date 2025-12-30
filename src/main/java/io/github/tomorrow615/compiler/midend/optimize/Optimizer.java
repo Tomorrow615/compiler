@@ -8,7 +8,7 @@ import io.github.tomorrow615.compiler.midend.llvm.instruction.Instruction;
 
 public class Optimizer {
     // 最大的内联迭代次数
-    private static final int MAX_INLINE_ITERATIONS = 20;
+    private static final int MAX_INLINE_ITERATIONS = 15;
     // 内部清理循环的次数
     private static final int MAX_INNER_ITERATIONS = 3;
     // 熔断阈值
@@ -58,6 +58,9 @@ public class Optimizer {
                 break;
             }
         }
+
+        // 内联结束后，移除不再使用的死函数
+        runPass(module, new GlobalDeadCodeElimination());
 
         // === Phase 3: 收尾优化 ===
         runPass(module, new AlgebraicSimplification());

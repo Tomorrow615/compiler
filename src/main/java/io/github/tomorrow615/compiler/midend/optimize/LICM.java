@@ -14,6 +14,11 @@ import java.util.*;
  * 1. 为每个循环插入 Pre-Header 块
  * 2. 识别循环不变量指令
  * 3. 将不变量外提到 Pre-Header
+ * 
+ * 改进 (v2):
+ * - 安全性修正: 禁止投机外提可能抛异常的指令 (Div/Rem)，除非保证执行。
+ * - 性能增强: 允许外提无副作用循环中的 Load 指令。
+ * - 完整性: 明确支持 GetElementPtr。
  */
 public class LICM implements Pass {
     
@@ -312,14 +317,17 @@ public class LICM implements Pass {
      * 检查指令类型是否可以外提
      */
     private boolean canBeHoisted(Instruction inst) {
-        // 这些指令类型可以安全外提
+        // 1. 基础算术指令：安全
         if (inst instanceof BinaryOpInst) return true;
         if (inst instanceof IcmpInst) return true;
-        if (inst instanceof GetElementPtrInst) return true;
+        if (inst instanceof GetElementPtrInst) return true; // GEP 非常重要
         if (inst instanceof ZextInst) return true;
         if (inst instanceof TruncInst) return true;
         
-        // Load 需要特殊处理（暂时保守，不外提）
+        // 2. Load 指令 (Simple Alias Analysis)
+        // 只有当它是基本的 Load 并且需要进一步检查是否有 Store
+        if (inst instanceof LoadInst) return true;
+        
         // Store、Call、Branch、Phi、Alloca 不能外提
         return false;
     }
@@ -328,10 +336,53 @@ public class LICM implements Pass {
      * 检查是否可以安全外提（支配所有出口）
      */
     private boolean canHoist(Instruction inst, LoopInfo loop, LoopAnalysis loopAnalysis) {
-        // 对于这些简单指令，只要是不变量就可以外提
-        // 更严格的检查会验证该指令是否支配所有使用点
-        // 这里采用保守策略：只要是不变量就外提
+        // 1. 安全性检查：除法/取模指令必须防止投机执行 (Speculative Execution)
+        // 规则：只有当该指令一定会执行（位于 Header），或者我们能证明安全时，才允许外提。
+        // 目前简单策略：只允许 Header 中的除法指令外提，或者除数为非零常数。
+        if (isDivisionOrRem(inst)) {
+            if (inst.getParentBlock() == loop.getHeader()) {
+                return true; // Header 一定执行，安全
+            }
+            // 如果除数是常数且非零，也安全
+            if (inst instanceof BinaryOpInst bin) {
+                if (bin.getRhs() instanceof ConstantInt c && c.getValue() != 0) {
+                    return true;
+                }
+            }
+            return false; // 其他情况保守不提，防止运行时异常
+        }
+
+        // 2. Load 指令的别名分析 (Simple)
+        if (inst instanceof LoadInst) {
+            return !hasSideEffectsInLoop(loop); 
+        }
+
         return true;
+    }
+
+    private boolean isDivisionOrRem(Instruction inst) {
+        if (inst instanceof BinaryOpInst bin) {
+            BinaryOpInst.OpCode op = bin.getOp();
+            return op == BinaryOpInst.OpCode.SDIV || 
+                   op == BinaryOpInst.OpCode.SREM;
+        }
+        return false;
+    }
+
+    /**
+     * 检查循环是否有副作用（Store 或 Call）
+     * 用于判断 Load 是否安全外提
+     */
+    private boolean hasSideEffectsInLoop(LoopInfo loop) {
+        for (BasicBlock bb : loop.getBlocks()) {
+            for (Instruction i : bb.getInstructions()) {
+                if (i instanceof StoreInst || i instanceof CallInst) {
+                    // 存在写入或函数调用，保守认为 Load 不安全
+                    return true;
+                }
+            }
+        }
+        return false;
     }
     
     /**

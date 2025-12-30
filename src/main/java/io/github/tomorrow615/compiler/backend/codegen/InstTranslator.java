@@ -164,6 +164,11 @@ public class InstTranslator {
         }
 
         // [Magic Number 优化] 常量取模优化
+        // [Cost Analysis]
+        // Hardware DIV: 15 cycles (computes both / and %)
+        // Magic Remainder: ~18 cycles (requires 2 multiplies + overhead)
+        // Conclusion: Do NOT optimize SREM via Magic Number unless it is power of 2 (handled by Midend).
+        /* 
         if (inst.getOp() == BinaryOpInst.OpCode.SREM && inst.getRhs() instanceof ConstantInt constMod) {
             int divisor = constMod.getValue();
             if (divisor > 1 && !isPowerOfTwo(divisor)) {
@@ -172,6 +177,7 @@ public class InstTranslator {
                 }
             }
         }
+        */
 
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV) {
             currentMipsBlock.addInstruction(new MipsBinary("div", lhs, rhs));
@@ -211,11 +217,11 @@ public class InstTranslator {
         }
 
         // 如果乘数超过 32 位有符号范围，暂不处理
-        if (magic.multiplier > Integer.MAX_VALUE || magic.multiplier < Integer.MIN_VALUE) {
-            return false;
-        }
-
-        int m = (int) magic.multiplier;
+        // 注意：BigInteger 版已经可以处理 m > 2^31 的情况(needsAdd)，但这里的逻辑需要匹配 NeedsAdd
+        // (InstTranslator 目前支持 needsAdd=true 逻辑)
+        // Check MIPS immediate limits? No, we load multiplier to register.
+        
+        int m = magic.multiplier;
         
         // 需要多个临时虚拟寄存器
         VirtualRegister vLhs = new VirtualRegister();
@@ -261,9 +267,7 @@ public class InstTranslator {
 
     /**
      * 使用 Magic Number 方法翻译常量取模
-     * 公式: a % b = a - (a / b) * b
-     * 
-     * @return true 如果成功优化，false 则回退到普通取模
+     * [Deprecated] 由于性能原因，已在 translateBinary 中禁用
      */
     private boolean translateRemByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {
         MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
@@ -271,11 +275,7 @@ public class InstTranslator {
             return false;
         }
 
-        if (magic.multiplier > Integer.MAX_VALUE || magic.multiplier < Integer.MIN_VALUE) {
-            return false;
-        }
-
-        int m = (int) magic.multiplier;
+        int m = magic.multiplier;
         
         // 临时虚拟寄存器
         VirtualRegister vLhs = new VirtualRegister();
