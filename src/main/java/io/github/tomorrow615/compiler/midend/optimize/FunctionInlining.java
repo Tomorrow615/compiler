@@ -18,7 +18,7 @@ import java.util.stream.Collectors;
 public class FunctionInlining implements Pass {
 
     // 激进的内联阈值：允许内联较大的函数
-    private static final int INLINE_THRESHOLD = 500;
+    private static final int INLINE_THRESHOLD = 100;
     
     // Caller 体积保护：防止单个函数过大导致寄存器分配崩溃
     private static final int MAX_CALLER_SIZE = 10000;

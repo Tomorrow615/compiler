@@ -14,7 +14,8 @@ public class BinaryOpInst extends Instruction {
         AND,
         OR,
         SHL,  // << (左移)
-        ASHR  // >> (算术右移，保留符号位)
+        ASHR,  // >> (算术右移，保留符号位)
+
     }
 
     private final OpCode op;
