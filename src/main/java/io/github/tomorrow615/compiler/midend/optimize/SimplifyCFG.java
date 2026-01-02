@@ -189,9 +189,9 @@ public class SimplifyCFG implements Pass {
                         // 继续检查，不 break，处理可能的多重引用（虽然标准 LLVM 不应该有）
                     }
                 }
-            } else {
-                break; // Phi 都在开头
             }
+            // 【修复】移除 break，继续遍历所有指令
+            // 内联后 Phi 可能不在块开头（例如 handleReturns 插入的 Phi）
         }
     }
 
@@ -203,9 +203,8 @@ public class SimplifyCFG implements Pass {
                         phi.setOperand(i + 1, newPred);
                     }
                 }
-            } else {
-                break;
             }
+            // 【修复】移除 break，继续遍历所有指令（与 cleanPhiNodes 保持一致）
         }
     }
     

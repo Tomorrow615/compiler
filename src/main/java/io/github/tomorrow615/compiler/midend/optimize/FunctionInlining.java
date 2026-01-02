@@ -177,15 +177,33 @@ public class FunctionInlining implements Pass {
                     continue; // Return 稍后处理
                 }
                 
-                // 直接创建完整的指令（包含操作数）
+                // [Pass 1] 直接创建指令（操作数暂时使用旧值）
+                // 这样避免 BasicBlock 遍历顺序导致的“使用前定义”问题
                 Instruction newInst = cloneInstruction(oldInst, newBB, suffix, valueMap, blockMap);
                 if (newInst != null) {
-                    // 注意：cloneInstruction 使用 newBB 作为 parentBlock，会自动添加到 newBB
                     valueMap.put(oldInst, newInst);
                     
-                    // 记录 Phi 用于后续修复
+                    // 记录 Phi 用于后续修复（其实 Pass 2 会统一处理所有指令，但 Phi 的 incoming block 还需要 blockMap）
                     if (oldInst instanceof PhiInst) {
                         phiMap.put(oldInst, newInst);
+                    }
+                }
+            }
+        }
+        
+        // [Pass 2] 统一修正所有新指令的操作数
+        // 遍历所有克隆出来的块中的指令
+        for (BasicBlock newBB : clonedBlocks) {
+            for (Instruction newInst : newBB.getInstructions()) {
+                // Phi 节点单独由 fixupPhiOperands 处理（涉及 incoming block 映射）
+                if (newInst instanceof PhiInst) continue;
+                
+                // 遍历并更新所有操作数
+                for (int i = 0; i < newInst.getOperands().size(); i++) {
+                    Value oldOp = newInst.getOperand(i);
+                    // 尝试解析为新值（如果 oldOp 是 oldInst，应该能找到映射；如果是 Constant，保持不变）
+                    if (valueMap.containsKey(oldOp)) {
+                         newInst.setOperand(i, valueMap.get(oldOp));
                     }
                 }
             }
@@ -211,6 +229,7 @@ public class FunctionInlining implements Pass {
         handleReturns(originalReturns, blockMap, valueMap, splitBlock, callInst);
 
         // --- Step 4: 清理 ---
+        callInst.removeUseFromOperands();  // [修复] 断开 Use-Def 链，避免幽灵引用
         callBlock.getInstructions().remove(callInst);
     }
 
@@ -256,46 +275,51 @@ public class FunctionInlining implements Pass {
     /**
      * 克隆单条指令（直接创建完整的指令，使用 valueMap 解析操作数）
      */
+    /**
+     * 克隆单条指令
+     * [Pass 1] 只创建指令结构，操作数暂时使用旧值 (Old Value)
+     * 操作数将在 Pass 2 中统一替换为新值
+     */
     private Instruction cloneInstruction(Instruction oldInst, BasicBlock newBB, String suffix,
                                           Map<Value, Value> valueMap, Map<BasicBlock, BasicBlock> blockMap) {
         String newName = oldInst.getName() != null ? oldInst.getName() + suffix : null;
         
         if (oldInst instanceof BinaryOpInst bin) {
-            Value newLhs = resolveValue(bin.getLhs(), valueMap);
-            Value newRhs = resolveValue(bin.getRhs(), valueMap);
-            return new BinaryOpInst(bin.getOp(), newLhs, newRhs, newName, newBB);
+            // 暂时使用旧操作数
+            return new BinaryOpInst(bin.getOp(), bin.getLhs(), bin.getRhs(), newName, newBB);
         }
         if (oldInst instanceof LoadInst load) {
-            Value newPtr = resolveValue(load.getPointer(), valueMap);
-            return new LoadInst(newPtr, newName, newBB);
+            return new LoadInst(load.getPointer(), newName, newBB);
         }
         if (oldInst instanceof StoreInst store) {
-            Value newVal = resolveValue(store.getValue(), valueMap);
-            Value newPtr = resolveValue(store.getPointer(), valueMap);
-            return new StoreInst(newVal, newPtr, newBB);
+            return new StoreInst(store.getValue(), store.getPointer(), newBB);
         }
         if (oldInst instanceof AllocaInst alloca) {
-            // [优化] 将 Alloca 提升到 Caller 的 Entry Block
-            // 这样 Mem2Reg 能更好地工作
+            // Alloca 不需要操作数，保持原逻辑
             Function caller = newBB.getParentFunction();
             BasicBlock entryBlock = caller.getBasicBlocks().get(0);
             
             AllocaInst newAlloca = new AllocaInst(alloca.getAllocatedType(), newName, entryBlock);
-            // 移动到 Entry Block 的指令列表头部
-            entryBlock.getInstructions().remove(newAlloca); // 先移除（构造函数自动加到了末尾）
-            entryBlock.getInstructions().add(0, newAlloca); // 加到头部
+            
+            List<Instruction> entryInsts = entryBlock.getInstructions();
+            entryInsts.remove(newAlloca); 
+            
+            int insertPos = 0;
+            while (insertPos < entryInsts.size() && entryInsts.get(insertPos) instanceof PhiInst) {
+                insertPos++;
+            }
+            entryInsts.add(insertPos, newAlloca);
             
             return newAlloca;
         }
         if (oldInst instanceof IcmpInst icmp) {
-            Value newLhs = resolveValue(icmp.getLhs(), valueMap);
-            Value newRhs = resolveValue(icmp.getRhs(), valueMap);
-            return new IcmpInst(icmp.getCmpType(), newLhs, newRhs, newName, newBB);
+            return new IcmpInst(icmp.getCmpType(), icmp.getLhs(), icmp.getRhs(), newName, newBB);
         }
         if (oldInst instanceof BranchInst br) {
             if (br.isConditional()) {
-                Value newCond = resolveValue(br.getOperand(0), valueMap);
-                // [修正] 统一使用 resolveValue 而不是 blockMap
+                // BranchTarget 需要在这里解析（因为构造函数需要 BasicBlock 类型，且涉及 CFG 边）
+                // 块一定已经被克隆了，所以 resolveValue 可以安全使用（针对 BasicBlock）
+                Value newCond = br.getOperand(0); // 暂时旧值
                 BasicBlock newTrue = (BasicBlock) resolveValue(br.getOperand(1), valueMap);
                 BasicBlock newFalse = (BasicBlock) resolveValue(br.getOperand(2), valueMap);
                 return new BranchInst(newCond, newTrue, newFalse, newBB);
@@ -305,34 +329,28 @@ public class FunctionInlining implements Pass {
             }
         }
         if (oldInst instanceof GetElementPtrInst gep) {
-            Value newBase = resolveValue(gep.getBasePtr(), valueMap);
-            List<Value> newIndices = new ArrayList<>();
-            for (Value idx : gep.getIndices()) {
-                newIndices.add(resolveValue(idx, valueMap));
-            }
-            return new GetElementPtrInst(newBase, newIndices, newName, newBB);
+            // GEP 的 indices 列表需要保持旧值
+            return new GetElementPtrInst(gep.getBasePtr(), gep.getIndices(), newName, newBB);
         }
         if (oldInst instanceof ZextInst zext) {
-            Value newVal = resolveValue(zext.getOperand(0), valueMap);
-            return new ZextInst(newVal, zext.getType(), newName, newBB);
+            return new ZextInst(zext.getOperand(0), zext.getType(), newName, newBB);
         }
         if (oldInst instanceof TruncInst trunc) {
-            Value newVal = resolveValue(trunc.getOperand(0), valueMap);
-            return new TruncInst(newVal, trunc.getType(), newName, newBB);
+            return new TruncInst(trunc.getOperand(0), trunc.getType(), newName, newBB);
         }
         if (oldInst instanceof PhiInst phi) {
-            // Phi 需要特殊处理：先创建空 Phi，稍后填充
             return new PhiInst(phi.getType(), newName, newBB);
         }
         if (oldInst instanceof CallInst call) {
-            List<Value> newArgs = new ArrayList<>();
-            for (Value arg : call.getArguments()) {
-                newArgs.add(resolveValue(arg, valueMap));
-            }
-            return new CallInst(call.getFunction(), newArgs, newName, newBB);
+            // 参数列表暂时用旧的
+            return new CallInst(call.getFunction(), call.getArguments(), newName, newBB);
+        }
+
+        if (oldInst instanceof ReturnInst) {
+            return null;
         }
         
-        return null;
+        throw new RuntimeException("FunctionInlining: 未处理的指令类型 " + oldInst.getClass().getSimpleName());
     }
 
     /**
@@ -378,7 +396,9 @@ public class FunctionInlining implements Pass {
             }
         }
         
-        // 如果没有有效的返回路径（Callee 内部全是死代码），用 0 替换
+        // [修复] 如果没有有效的返回路径（Callee 内部全是死代码）
+        // 仍然需要从 calleeEntry 跳转到 splitBlock，否则 splitBlock 成为不可达块
+        // 但如果找不到入口（理论上不可能），或者 callee 本身就是死循环，不需要强行跳转
         if (validReturns.isEmpty()) {
             if (!callInst.getType().isVoidType()) {
                 replaceAllUsesWith(callInst, new ConstantInt(0));
@@ -435,6 +455,8 @@ public class FunctionInlining implements Pass {
      * 替换 Block 中 Phi 节点的前驱引用
      */
     private void replacePhiPredecessor(BasicBlock bb, BasicBlock oldPred, BasicBlock newPred) {
+        // [修复] 遍历所有指令，不仅仅是块开头的 Phi
+        // 经过 mergeBlocks 或其他 Pass 后，Phi 可能出现在块中间
         for (Instruction inst : bb.getInstructions()) {
             if (inst instanceof PhiInst phi) {
                 for (int i = 0; i < phi.getOperands().size(); i += 2) {
@@ -442,9 +464,8 @@ public class FunctionInlining implements Pass {
                         phi.setOperand(i + 1, newPred);
                     }
                 }
-            } else {
-                break;
             }
+            // [修复] 移除 break，继续遍历所有指令
         }
     }
 

@@ -86,11 +86,19 @@ public class SROA_Simple implements Pass {
                     return;
                 }
                 
-                // 【关键修复】检查 GEP 的使用者，只能是 Load/Store
+                // 【关键修复】检查 GEP 的使用者
+                // GEP 结果只能用于直接的 Load/Store 数组元素
                 for (Use gepUse : gep.getUsers()) {
                     User gepUser = gepUse.getUser();
-                    if (!(gepUser instanceof LoadInst || gepUser instanceof StoreInst)) {
-                        // GEP 被用于其他目的（如传递给函数），数组逃逸了
+                    if (gepUser instanceof StoreInst storeInst) {
+                        // 区分：store value, gep（正常访问）vs store gep, ptr（指针逃逸）
+                        if (storeInst.getValue() == gep) {
+                            // GEP 指针本身被存储 → 数组地址逃逸！
+                            return;
+                        }
+                        // store xxx, gep 是正常的元素访问，OK
+                    } else if (!(gepUser instanceof LoadInst)) {
+                        // GEP 被用于其他目的（如 CallInst 参数），数组逃逸了
                         return;
                     }
                 }

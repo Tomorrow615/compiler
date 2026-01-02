@@ -40,7 +40,10 @@ public class ConstantFolding implements Pass {
                     }
                 }
                 
-                // 删除已折叠的指令
+                // 删除已折叠的指令（必须先清理 Use-Def 链）
+                for (Instruction inst : toRemove) {
+                    inst.removeUseFromOperands();  // 【修复】断开对操作数的引用
+                }
                 bb.getInstructions().removeAll(toRemove);
             }
         }

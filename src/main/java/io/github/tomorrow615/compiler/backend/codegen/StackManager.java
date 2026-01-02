@@ -27,6 +27,7 @@ public class StackManager {
     private final Map<Value, Integer> valueOffsetMap;
     private int stackSize;
     private int bottomReserve;  // 栈底预留空间
+    private int outgoingArgsSize;  // 预留给函数调用参数的空间
 
     public StackManager(Function function) {
         this.valueOffsetMap = new HashMap<>();
@@ -51,6 +52,9 @@ public class StackManager {
         if (reservedSize % 8 != 0 && reservedSize > 0) {
             reservedSize += (8 - reservedSize % 8);
         }
+        
+        // 保存预留给调用参数的空间大小
+        this.outgoingArgsSize = reservedSize;
 
         // 栈从预留区之后开始分配局部变量
         // 0 ~ reservedSize-1 : 留给 call 的参数使用
@@ -140,5 +144,13 @@ public class StackManager {
      */
     public int getBottomReserve() {
         return bottomReserve;
+    }
+    
+    /**
+     * 获取预留给函数调用参数（第5个及以后）的空间大小
+     * 这部分空间的偏移在扩展栈帧时不应被修改
+     */
+    public int getOutgoingArgsSize() {
+        return outgoingArgsSize;
     }
 }

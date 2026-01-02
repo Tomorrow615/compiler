@@ -78,7 +78,10 @@ public class AlgebraicSimplification implements Pass {
                     }
                 }
                 
-                // 统一移除死指令
+                // 【修复】删除指令前必须断开 Use-Def 链
+                for (Instruction inst : toRemove) {
+                    inst.removeUseFromOperands();
+                }
                 bb.getInstructions().removeAll(toRemove);
             }
         }

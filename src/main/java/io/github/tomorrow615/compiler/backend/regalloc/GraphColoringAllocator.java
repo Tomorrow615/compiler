@@ -596,9 +596,14 @@ public class GraphColoringAllocator {
         // Ensure 8-byte alignment for the spill area
         if (spillSize % 8 != 0) spillSize += (8 - spillSize % 8);
 
-        // 2. Assign offsets to spill nodes (start from 0)
+        // [Critical Fix] 获取预留给函数调用参数的空间大小
+        // 这部分空间的偏移不应被修改，因为它们是给被调用函数的固定位置
+        int outgoingArgsSize = stackManager.getOutgoingArgsSize();
+        
+        // 2. Assign offsets to spill nodes
+        // [Critical Fix] 溢出槽必须从 outgoingArgsSize 开始，避免与调用参数区域 [0, outgoingArgsSize) 冲突
         Map<Operand, Integer> spilledOffsets = new HashMap<>();
-        int currentSpillOffset = 0;
+        int currentSpillOffset = outgoingArgsSize;  // 从 outgoingArgsSize 开始！
         for (Operand spill : memSpillNodes) {
              spilledOffsets.put(spill, currentSpillOffset);
              currentSpillOffset += 4;
@@ -631,14 +636,19 @@ public class GraphColoringAllocator {
                         // Patch addiu $sp, offset (address calculation)
                         else if ((bin.getOp().equals("addiu") || bin.getOp().equals("addi")) && 
                                  bin.getRs() == MipsRegister.SP) {
-                             // All existing stack objects are shifted up
-                             patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + extraFrameSize);
+                            // [Critical Fix] 只修正本函数栈帧内的访问，跳过调用参数区域
+                            if (bin.getImm() >= outgoingArgsSize) {
+                                patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + extraFrameSize);
+                            }
                         }
                     } else if (inst instanceof MipsLoadStore ls) {
                         // Patch loads/stores: lw/sw reg, offset($sp)
                         if (ls.getBase() == MipsRegister.SP) {
-                            // All existing stack access (Locals, Args, RA) needs to be shifted up
-                            patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + extraFrameSize);
+                            // [Critical Fix] 只修正本函数栈帧内的访问，跳过调用参数区域
+                            // 偏移 < outgoingArgsSize 的是函数调用参数传递，不应修改
+                            if (ls.getOffset() >= outgoingArgsSize) {
+                                patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + extraFrameSize);
+                            }
                         }
                     }
                     newInsts.add(patched);
@@ -870,6 +880,10 @@ public class GraphColoringAllocator {
                 csrSize += (8 - csrSize % 8);
             }
             
+            // [Critical Fix] 获取预留给函数调用参数的空间大小
+            io.github.tomorrow615.compiler.backend.codegen.StackManager stackManager = func.getStackManager();
+            int outgoingArgsSize = (stackManager != null) ? stackManager.getOutgoingArgsSize() : 0;
+            
             // 1. Patch Stack Offsets (Prologue, Epilogue, and existing Access)
             // Similar to spill rewrite, but now for CSR
             for (MipsBasicBlock block : func.getBlocks()) {
@@ -886,15 +900,20 @@ public class GraphColoringAllocator {
                         else if (bin.getOp().equals("addu") && bin.getRd() == MipsRegister.SP && bin.getRs() == MipsRegister.SP) {
                             patched = new MipsBinary("addu", MipsRegister.SP, MipsRegister.SP, bin.getImm() + csrSize);
                         }
-                        // [Fix] Restore CSR addiu patching (unconditional shift)
+                        // [Critical Fix] CSR addiu patching - 只修正本函数栈帧内的访问
                         else if ((bin.getOp().equals("addiu") || bin.getOp().equals("addi")) && 
                                  bin.getRs() == MipsRegister.SP) {
-                            patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + csrSize);
+                            if (bin.getImm() >= outgoingArgsSize) {
+                                patched = new MipsBinary(bin.getOp(), bin.getRd(), MipsRegister.SP, bin.getImm() + csrSize);
+                            }
                         }
                     } else if (inst instanceof MipsLoadStore ls) {
                         // Access: lw/sw $t, offset($sp)
                         if (ls.getBase() == MipsRegister.SP) {
-                            patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + csrSize);
+                            // [Critical Fix] 只修正本函数栈帧内的访问，跳过调用参数区域
+                            if (ls.getOffset() >= outgoingArgsSize) {
+                                patched = new MipsLoadStore(ls.getType(), ls.getRt(), MipsRegister.SP, ls.getOffset() + csrSize);
+                            }
                         }
                     }
                     newInsts.add(patched);
@@ -929,9 +948,10 @@ public class GraphColoringAllocator {
                     bin.getRd() == MipsRegister.SP && bin.getRs() == MipsRegister.SP) {
                     subuFound = true;
                     // Insert Saves
-                    // Offset: 0, 4, 8... because stack was shifted up by csrSize.
-                    // The bottom [0, csrSize) is for us.
-                    int off = 0;
+                    // [Critical Fix] CSR 保存区域在 outgoingArgsSize 之后，避免与函数调用参数区域冲突
+                    // 栈布局: [0, outgoingArgsSize) = 调用参数区
+                    //         [outgoingArgsSize, outgoingArgsSize + csrSize) = CSR 保存区
+                    int off = outgoingArgsSize;
                     for (MipsRegister s : sortedS) {
                         newEntryInsts.add(new MipsLoadStore(MipsLoadStore.Type.SW, s, MipsRegister.SP, off));
                         off += 4;
@@ -942,9 +962,10 @@ public class GraphColoringAllocator {
             if (!subuFound) {
                  // No frame originally. But we need frame for CSR.
                  // Insert "subu $sp, $sp, csrSize" at head.
+                 // [Critical Fix] 即使原本无栈帧，也需要在 outgoingArgsSize 之后保存 CSR
                  List<MipsInstruction> wrapper = new ArrayList<>();
                  wrapper.add(new MipsBinary("subu", MipsRegister.SP, MipsRegister.SP, csrSize));
-                 int off = 0;
+                 int off = outgoingArgsSize;
                  for (MipsRegister s : sortedS) {
                      wrapper.add(new MipsLoadStore(MipsLoadStore.Type.SW, s, MipsRegister.SP, off));
                      off += 4;
@@ -993,7 +1014,8 @@ public class GraphColoringAllocator {
                      }
                      
                      if (isEpiloguePoint) {
-                        int off = 0;
+                        // [Critical Fix] CSR 恢复偏移与保存偏移一致，从 outgoingArgsSize 开始
+                        int off = outgoingArgsSize;
                         for (MipsRegister s : sortedS) {
                             newInsts.add(new MipsLoadStore(MipsLoadStore.Type.LW, s, MipsRegister.SP, off));
                             off += 4;

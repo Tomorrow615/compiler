@@ -6,14 +6,18 @@ import io.github.tomorrow615.compiler.backend.mips.structure.MipsBasicBlock;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsFunction;
 import io.github.tomorrow615.compiler.midend.llvm.instruction.*;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
+import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
+import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 
 import io.github.tomorrow615.compiler.backend.mips.operand.Operand;
 import io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister;
 import io.github.tomorrow615.compiler.midend.optimize.MagicNumber;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 指令翻译器
@@ -29,18 +33,21 @@ public class InstTranslator {
     // 当前正在处理的 LLVM 基本块 (用于 Phi 节点的前驱判断)
     private BasicBlock currentLLVMBlock;
     
-    // [Phase 2] ValueMap: LLVM Value -> MIPS Operand (VirtualRegister)
-    // 用于跟踪临时计算结果，避免不必要的栈访问
     private final Map<Value, Operand> valueMap;
-
-    // [Phase 2 Fix] BlockMap: LLVM BasicBlock -> MipsBasicBlock
-    // 用于构建 CFG (Liveness 分析依赖 CFG)
     private final Map<BasicBlock, MipsBasicBlock> blockMap;
 
-    // [Optimization] Local Cache for Argument Loads
-    // Reset per MipsBasicBlock to ensure dominance safety
+    // [Optimization] Local Cache for Argument Loads within a block
     private final Map<Value, VirtualRegister> localArgCache;
     private MipsBasicBlock lastVisitedBlock;
+
+    // [Optimization] 为了在 Basic Block 范围内复用全局变量地址
+    private final Map<String, VirtualRegister> globalAddrCache = new HashMap<>();
+
+    // [Optimization] 记录被融合（Folded）的指令，跳过代码生成
+    private final Set<Instruction> foldedInstructions = new HashSet<>();
+
+    // [Optimization] Syscall $v0 状态缓存：避免重复 li $v0, X
+    private int cachedV0 = -1;
 
     public InstTranslator(StackManager stackManager, MipsFunction mipsFunction) {
         this.stackManager = stackManager;
@@ -51,12 +58,7 @@ public class InstTranslator {
         this.lastVisitedBlock = null;
     }
 
-    /**
-     * 翻译整个函数的入口
-     */
     public void translate(Function llvmFunction) {
-        // 1. 第一遍扫描：创建所有 MipsBasicBlock 并建立映射
-        // 这是为了在处理分支指令时能够获取到目标块的引用，从而构建 CFG
         for (BasicBlock llvmBB : llvmFunction.getBasicBlocks()) {
             String label = makeLabel(llvmBB);
             MipsBasicBlock mipsBB = new MipsBasicBlock(label);
@@ -64,22 +66,38 @@ public class InstTranslator {
             blockMap.put(llvmBB, mipsBB);
         }
 
-        // 2. 第二遍扫描：翻译块内的每条指令
         for (BasicBlock llvmBB : llvmFunction.getBasicBlocks()) {
             this.currentLLVMBlock = llvmBB;
             this.currentMipsBlock = blockMap.get(llvmBB);
+            
+            // [Optimization] 清除本块内的地址/参数缓存
+            globalAddrCache.clear();
+            localArgCache.clear();
+            foldedInstructions.clear();
+            cachedV0 = -1; // 清除 syscall $v0 缓存
 
-            // [Phase 2 Fix] 预先为当前块的所有 Phi 指令创建 VReg
-            // 确保即使前驱块（如循环后向边）尚未处理，Phi 的 VReg 也已存在，供块内后续指令引用
+            // 1. 预扫描：标记哪些 GEP 可以被跳过 (GEP Fusion)
             for (Instruction inst : llvmBB.getInstructions()) {
-                if (inst instanceof PhiInst phi) {
-                    valueMap.computeIfAbsent(phi, k -> new VirtualRegister());
-                } else {
-                    break; // Phi 指令必定位于块开头
+                if ((inst instanceof LoadInst load) && canFoldGep(load.getPointer())) {
+                    foldedInstructions.add((Instruction) load.getPointer());
+                } else if ((inst instanceof StoreInst store) && canFoldGep(store.getPointer())) {
+                    foldedInstructions.add((Instruction) store.getPointer());
                 }
             }
 
             for (Instruction inst : llvmBB.getInstructions()) {
+                if (inst instanceof PhiInst phi) {
+                    valueMap.computeIfAbsent(phi, k -> new VirtualRegister());
+                } else {
+                    break;
+                }
+            }
+
+            for (Instruction inst : llvmBB.getInstructions()) {
+                // 如果是被折叠的指令，直接跳过生成
+                if (foldedInstructions.contains(inst)) {
+                    continue;
+                }
                 translateInstruction(inst);
             }
         }
@@ -95,89 +113,57 @@ public class InstTranslator {
         } else if (inst instanceof StoreInst store) {
             translateStore(store);
         } else if (inst instanceof AllocaInst) {
-            // Alloca 不生成指令，空间已在栈上分配
+            // No-op
         } else if (inst instanceof IcmpInst icmp) {
             translateIcmp(icmp);
         } else if (inst instanceof BranchInst br) {
             translateBranch(br);
         } else if (inst instanceof PhiInst) {
-            // Phi 指令本身不生成代码
-            // 它的逻辑在跳转指令发生前，由前驱块负责 Copy
-        } else if (inst instanceof CallInst call) { // [新增]
+            // Handled by predecessors
+        } else if (inst instanceof CallInst call) {
             translateCall(call);
-        } else if (inst instanceof GetElementPtrInst gep) { // [新增]
+        } else if (inst instanceof GetElementPtrInst gep) {
             translateGep(gep);
-        } else if (inst instanceof ZextInst zext) { // [新增]
+        } else if (inst instanceof ZextInst zext) {
             translateZext(zext);
-        } else if (inst instanceof TruncInst trunc) { // [新增] 建议一并加上
-            translateZext(trunc); // 逻辑一样，复用即可
+        } else if (inst instanceof TruncInst trunc) {
+            translateZext(trunc);
         }
-        // TODO: Call, Gep (后续阶段实现)
     }
 
-    // === 具体指令翻译 ===
     private void translateReturn(ReturnInst inst) {
-        // 1. 如果有返回值，Move 到 $v0
         if (!inst.isVoidRet()) {
-            // [Phase 2 修正] 使用 getOperand 获取返回值
             Operand retVal = getOperand(inst.getReturnValue());
             currentMipsBlock.addInstruction(new MipsMove(MipsRegister.V0, retVal));
         }
 
-        // 2. 生成函数尾声 (Epilogue)
-        // 恢复 $ra
         int raOffset = stackManager.getRaOffset();
         currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, MipsRegister.RA, MipsRegister.SP, raOffset));
 
-        // 关栈
         int frameSize = stackManager.getFrameSize();
         if (frameSize > 0) {
             currentMipsBlock.addInstruction(new MipsBinary("addu", MipsRegister.SP, MipsRegister.SP, frameSize));
         }
 
-        // [核心修复] 特判 main 函数的返回
         if (mipsFunction.getName().equals("main")) {
-            // 如果是 main 函数，执行 syscall 10 终止程序
-            // 否则 jr $ra 会跳到 0 地址导致崩溃
-            currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, 10)); // 10: exit
+            currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, 10));
             currentMipsBlock.addInstruction(new MipsSyscall());
         } else {
-            // 普通函数：跳转回调用者
             currentMipsBlock.addInstruction(new MipsBranch("jr", MipsRegister.RA));
         }
     }
 
     private void translateBinary(BinaryOpInst inst) {
-        // [Phase 2 重构] 使用 getOperand 获取操作数（虚拟寄存器）
         Operand lhs = getOperand(inst.getLhs());
         Operand rhs = getOperand(inst.getRhs());
-        VirtualRegister dest = new VirtualRegister();
+        VirtualRegister dest = getOrCreateDestReg(inst);
 
-        // [Magic Number 优化] 常量除法优化
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV && inst.getRhs() instanceof ConstantInt constDiv) {
             int divisor = constDiv.getValue();
             if (divisor > 1 && !isPowerOfTwo(divisor)) {
-                if (translateDivByMagicNumber(inst, lhs, divisor)) {
-                    return;
-                }
+                if (translateDivByMagicNumber(inst, lhs, divisor)) return;
             }
         }
-
-        // [Magic Number 优化] 常量取模优化
-        // [Cost Analysis]
-        // Hardware DIV: 15 cycles (computes both / and %)
-        // Magic Remainder: ~18 cycles (requires 2 multiplies + overhead)
-        // Conclusion: Do NOT optimize SREM via Magic Number unless it is power of 2 (handled by Midend).
-        /* 
-        if (inst.getOp() == BinaryOpInst.OpCode.SREM && inst.getRhs() instanceof ConstantInt constMod) {
-            int divisor = constMod.getValue();
-            if (divisor > 1 && !isPowerOfTwo(divisor)) {
-                if (translateRemByMagicNumber(inst, lhs, divisor)) {
-                    return;
-                }
-            }
-        }
-        */
 
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV) {
             currentMipsBlock.addInstruction(new MipsBinary("div", lhs, rhs));
@@ -200,124 +186,37 @@ public class InstTranslator {
             };
             currentMipsBlock.addInstruction(new MipsBinary(op, dest, lhs, rhs));
         }
-        // [Phase 2 关键]将结果存入 valueMap，而非立即写回栈
-        valueMap.put(inst, dest);
     }
 
-    /**
-     * 使用 Magic Number 方法翻译常量除法
-     * x / d = (x * m) >> (32 + s) + 符号修正
-     * 
-     * @return true 如果成功优化，false 则回退到普通除法
-     */
     private boolean translateDivByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {
         MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
-        if (magic == null) {
-            return false;
-        }
+        if (magic == null) return false;
 
-        // 如果乘数超过 32 位有符号范围，暂不处理
-        // 注意：BigInteger 版已经可以处理 m > 2^31 的情况(needsAdd)，但这里的逻辑需要匹配 NeedsAdd
-        // (InstTranslator 目前支持 needsAdd=true 逻辑)
-        // Check MIPS immediate limits? No, we load multiplier to register.
-        
-        int m = magic.multiplier;
-        
-        // 需要多个临时虚拟寄存器
         VirtualRegister vLhs = new VirtualRegister();
         VirtualRegister vMagic = new VirtualRegister();
         VirtualRegister vHi = new VirtualRegister();
         VirtualRegister vShifted = new VirtualRegister();
         VirtualRegister vSign = new VirtualRegister();
-        VirtualRegister dest = new VirtualRegister();
+        VirtualRegister dest = getOrCreateDestReg(inst);
         
-        // 1. 复制 lhs 到虚拟寄存器（可能已经是 VReg，但为安全起见）
         currentMipsBlock.addInstruction(new MipsMove(vLhs, lhsOp));
-        
-        // 2. 加载 Magic Number
-        currentMipsBlock.addInstruction(new MipsLi(vMagic, m));
-        
-        // 3. mult (有符号乘法)
+        currentMipsBlock.addInstruction(new MipsLi(vMagic, magic.multiplier));
         currentMipsBlock.addInstruction(new MipsBinary("mult", vLhs, vMagic));
-        
-        // 4. mfhi (取高 32 位)
         currentMipsBlock.addInstruction(new MipsBinary("mfhi", vHi));
         
-        // 5. 如果需要加法修正
         if (magic.needsAdd) {
             currentMipsBlock.addInstruction(new MipsBinary("addu", vHi, vHi, vLhs));
         }
         
-        // 6. 算术右移 shift 位
         if (magic.shift > 0) {
             currentMipsBlock.addInstruction(new MipsBinary("sra", vShifted, vHi, magic.shift));
         } else {
             currentMipsBlock.addInstruction(new MipsMove(vShifted, vHi));
         }
         
-        // 7. 符号修正：sign = x >> 31
         currentMipsBlock.addInstruction(new MipsBinary("sra", vSign, vLhs, 31));
-        
-        // 8. result = shifted - sign
         currentMipsBlock.addInstruction(new MipsBinary("subu", dest, vShifted, vSign));
         
-        valueMap.put(inst, dest);
-        return true;
-    }
-
-    /**
-     * 使用 Magic Number 方法翻译常量取模
-     * [Deprecated] 由于性能原因，已在 translateBinary 中禁用
-     */
-    private boolean translateRemByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {
-        MagicNumber.MagicResult magic = MagicNumber.computeSigned(divisor);
-        if (magic == null) {
-            return false;
-        }
-
-        int m = magic.multiplier;
-        
-        // 临时虚拟寄存器
-        VirtualRegister vLhs = new VirtualRegister();
-        VirtualRegister vMagic = new VirtualRegister();
-        VirtualRegister vHi = new VirtualRegister();
-        VirtualRegister vShifted = new VirtualRegister();
-        VirtualRegister vSign = new VirtualRegister();
-        VirtualRegister vQuot = new VirtualRegister();
-        VirtualRegister vDivisor = new VirtualRegister();
-        VirtualRegister vQuotMulDiv = new VirtualRegister();
-        VirtualRegister dest = new VirtualRegister();
-        
-        // 1. 保存 lhs 副本
-        currentMipsBlock.addInstruction(new MipsMove(vLhs, lhsOp));
-        
-        // 2-8. 计算 quotient = a / b (与 div 优化相同)
-        currentMipsBlock.addInstruction(new MipsLi(vMagic, m));
-        currentMipsBlock.addInstruction(new MipsBinary("mult", vLhs, vMagic));
-        currentMipsBlock.addInstruction(new MipsBinary("mfhi", vHi));
-        
-        if (magic.needsAdd) {
-            currentMipsBlock.addInstruction(new MipsBinary("addu", vHi, vHi, vLhs));
-        }
-        
-        if (magic.shift > 0) {
-            currentMipsBlock.addInstruction(new MipsBinary("sra", vShifted, vHi, magic.shift));
-        } else {
-            currentMipsBlock.addInstruction(new MipsMove(vShifted, vHi));
-        }
-        
-        currentMipsBlock.addInstruction(new MipsBinary("sra", vSign, vLhs, 31));
-        currentMipsBlock.addInstruction(new MipsBinary("subu", vQuot, vShifted, vSign));
-        // 现在 vQuot = a / b
-        
-        // 9. 计算 quotient * divisor
-        currentMipsBlock.addInstruction(new MipsLi(vDivisor, divisor));
-        currentMipsBlock.addInstruction(new MipsBinary("mul", vQuotMulDiv, vQuot, vDivisor));
-        
-        // 10. 计算 remainder = a - quotient * divisor
-        currentMipsBlock.addInstruction(new MipsBinary("subu", dest, vLhs, vQuotMulDiv));
-        
-        valueMap.put(inst, dest);
         return true;
     }
 
@@ -326,25 +225,102 @@ public class InstTranslator {
     }
 
     private void translateLoad(LoadInst inst) {
-        // [Phase 2 重构] Load 从内存读取，结果存入 VReg
-        Operand ptr = getOperand(inst.getPointer());
-        VirtualRegister dest = new VirtualRegister();
-        currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, dest, ptr, 0));
-        valueMap.put(inst, dest);
+        Value ptrVal = inst.getPointer();
+        Operand ptrOp;
+        int offset = 0;
+
+        if (ptrVal instanceof GetElementPtrInst gep && isSimpleConstantGep(gep)) {
+            ptrOp = getOperand(gep.getBasePtr());
+            offset = getGepConstantOffset(gep);
+        } else {
+            ptrOp = getOperand(ptrVal);
+        }
+
+        VirtualRegister dest = getOrCreateDestReg(inst);
+        currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, dest, ptrOp, offset));
     }
 
-       private void translateStore(StoreInst inst) {
-        // [Phase 2 重构] Store 是真正的内存写入
+    private void translateStore(StoreInst inst) {
         Operand value = getOperand(inst.getValue());
-        Operand ptr = getOperand(inst.getPointer());
-        currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, value, ptr, 0));
+        Value ptrVal = inst.getPointer();
+        Operand ptrOp;
+        int offset = 0;
+
+        if (ptrVal instanceof GetElementPtrInst gep && isSimpleConstantGep(gep)) {
+            ptrOp = getOperand(gep.getBasePtr());
+            offset = getGepConstantOffset(gep);
+        } else {
+            ptrOp = getOperand(ptrVal);
+        }
+
+        currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, value, ptrOp, offset));
+    }
+
+    // 辅助判断方法：检查 GEP 是否可以被折叠
+    private boolean canFoldGep(Value pointer) {
+        if (pointer instanceof GetElementPtrInst gep) {
+            return isSimpleConstantGep(gep);
+        }
+        return false;
+    }
+
+    // 检查是否为简单的常量偏移 GEP
+    // 安全策略：
+    // 1. 单索引 GEP (一维数组或指针偏移): gep %ptr, %const -> offset = const * 4
+    // 2. 双索引 GEP (二维数组/全局数组衰退): gep @arr, 0, %const -> offset = const * 4
+    // 其他情况保守处理，不融合
+    private boolean isSimpleConstantGep(GetElementPtrInst gep) {
+        List<Value> indices = gep.getIndices();
+        if (indices.isEmpty()) return false;
+        
+        if (indices.size() == 1) {
+            return indices.get(0) instanceof ConstantInt;
+        } else if (indices.size() == 2) {
+            // 必须保证第一维是 0，才不会产生额外的偏移
+            return (indices.get(0) instanceof ConstantInt c1 && c1.getValue() == 0) &&
+                   (indices.get(1) instanceof ConstantInt);
+        }
+        
+        return false;
+    }
+
+    private int getGepConstantOffset(GetElementPtrInst gep) {
+        List<Value> indices = gep.getIndices();
+        ConstantInt lastIdx = (ConstantInt) indices.get(indices.size() - 1);
+        return lastIdx.getValue() * 4;
+    }
+
+    // ... (skipped some methods)
+
+    private void translateZext(Instruction inst) {
+        // Zext/Trunc 从语义上是位宽转换，但在 MIPS 寄存器中都是 32 位存储
+        // SysY 中只有 i1/i8/i32。
+        
+        // [Safety Fix] 对于 Trunc 到 i1 的情况，必须清除高位
+        // 防止例如 3 (..11) 被当做 true，但某些指令只看最低位导致错误
+        if (inst instanceof TruncInst && inst.getType() instanceof IntegerType it && it.getBitWidth() == 1) {
+            Operand src = getOperand(inst.getOperand(0));
+            VirtualRegister dest = getOrCreateDestReg(inst);
+            currentMipsBlock.addInstruction(new MipsBinary("andi", dest, src, 1));
+            return;
+        }
+        
+        // 其他情况 (Zext i1->i32, Trunc i32->i8等整个字处理) 直接复用寄存器
+        Operand src = getOperand(inst.getOperand(0));
+        // 检查是否已经有预分配的寄存器
+        Operand existing = valueMap.get(inst);
+        if (existing instanceof VirtualRegister destVr) {
+            // 需要复制到预分配的寄存器
+            currentMipsBlock.addInstruction(new MipsMove(destVr, src));
+        } else {
+            valueMap.put(inst, src);
+        }
     }
 
     private void translateIcmp(IcmpInst inst) {
-        // [Phase 2 重构] 使用虚拟寄存器
         Operand lhs = getOperand(inst.getLhs());
         Operand rhs = getOperand(inst.getRhs());
-        VirtualRegister dest = new VirtualRegister();
+        VirtualRegister dest = getOrCreateDestReg(inst);
 
         String op = switch (inst.getCmpType()) {
             case EQ -> "seq";
@@ -356,52 +332,62 @@ public class InstTranslator {
         };
 
         currentMipsBlock.addInstruction(new MipsCompare(op, dest, lhs, rhs));
-        valueMap.put(inst, dest);
     }
 
     private void translateBranch(BranchInst inst) {
         if (inst.isConditional()) {
-            // === 条件跳转: br %cond, label %true, label %false ===
+            Value condVal = inst.getCondition();
             BasicBlock trueTarget = (BasicBlock) inst.getOperand(1);
             BasicBlock falseTarget = (BasicBlock) inst.getOperand(2);
             String trueLabel = makeLabel(trueTarget);
             String falseLabel = makeLabel(falseTarget);
 
-            // [Phase 2 Fix] 构建 CFG (Liveness 分析依赖)
             MipsBasicBlock trueMips = blockMap.get(trueTarget);
             MipsBasicBlock falseMips = blockMap.get(falseTarget);
             linkBlocks(currentMipsBlock, trueMips);
             linkBlocks(currentMipsBlock, falseMips);
 
-            // 1. 预执行 True 分支的 Phi Copy
             processPhiNodes(trueTarget);
-            // 2. 预执行 False 分支的 Phi Copy
             processPhiNodes(falseTarget);
 
-            // 3. 生成跳转指令
-            // [Phase 2 重构] 使用 getOperand 加载条件值
-            Operand cond = getOperand(inst.getCondition());
-            currentMipsBlock.addInstruction(new MipsBranch("bnez", cond, trueLabel));
-            currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+            // [Optimization] 尝试穿透 Zext/Trunc 找到原始的 Icmp
+            // 循环穿透直到找到 IcmpInst 或无法穿透为止
+            while (condVal instanceof ZextInst || condVal instanceof TruncInst) {
+                 if (condVal instanceof Instruction zt && zt.getOperand(0) instanceof Instruction inner) {
+                     condVal = inner;
+                 } else {
+                     break;
+                 }
+            }
 
+            if (condVal instanceof IcmpInst icmp) {
+                Operand lhs = getOperand(icmp.getLhs());
+                Operand rhs = getOperand(icmp.getRhs());
+                String branchOp = switch (icmp.getCmpType()) {
+                    case EQ -> "beq";
+                    case NE -> "bne";
+                    case SLT -> "blt";
+                    case SLE -> "ble";
+                    case SGT -> "bgt";
+                    case SGE -> "bge";
+                };
+                currentMipsBlock.addInstruction(new MipsBranch(branchOp, lhs, rhs, trueLabel));
+                currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+            } else {
+                Operand cond = getOperand(inst.getCondition());
+                currentMipsBlock.addInstruction(new MipsBranch("bnez", cond, trueLabel));
+                currentMipsBlock.addInstruction(new MipsBranch("j", falseLabel));
+            }
         } else {
-            // === 无条件跳转: br label %target ===
             BasicBlock target = (BasicBlock) inst.getOperand(0);
-
-            // [Phase 2 Fix] 构建 CFG
             MipsBasicBlock targetMips = blockMap.get(target);
             linkBlocks(currentMipsBlock, targetMips);
-
-            // 1. 处理 Phi
             processPhiNodes(target);
-
-            // 2. 跳转
             String label = makeLabel(target);
             currentMipsBlock.addInstruction(new MipsBranch("j", label));
         }
     }
 
-    // [Phase 2 Fix] 辅助方法：连接两个块
     private void linkBlocks(MipsBasicBlock pred, MipsBasicBlock succ) {
         if (pred != null && succ != null) {
             pred.addSuccessor(succ);
@@ -409,19 +395,16 @@ public class InstTranslator {
         }
     }
 
-    // === 新增：函数调用翻译 ===
     private void translateCall(CallInst inst) {
         Function targetFunc = inst.getFunction();
         List<Value> args = inst.getArguments();
-        String funcLabel = targetFunc.getName().substring(1); // 去掉 @
+        String funcLabel = targetFunc.getName().substring(1);
 
-        // [优化] 内联库函数调用
         if (isInlineableLibFunction(funcLabel)) {
             inlineLibFunction(funcLabel, inst);
             return;
         }
 
-        // 1. 准备前 4 个参数 (寄存器传递)
         for (int i = 0; i < Math.min(4, args.size()); i++) {
             Value arg = args.get(i);
             Operand argOp = getOperand(arg);
@@ -429,46 +412,28 @@ public class InstTranslator {
             currentMipsBlock.addInstruction(new MipsMove(argReg, argOp));
         }
 
-        // 2. 准备栈参数 (第 5 个及以后)
-        // [核心修改] 不再移动 SP，而是直接存入预留的栈底空间
         for (int i = 4; i < args.size(); i++) {
             Value arg = args.get(i);
             Operand argOp = getOperand(arg);
-            
-            // 计算在预留区中的偏移：(i - 4) * 4
-            // 这个区域已经被 StackManager 预留好了，绝对安全
             int offset = (i - 4) * 4;
-            
-            currentMipsBlock.addInstruction(new MipsLoadStore(
-                MipsLoadStore.Type.SW, argOp, MipsRegister.SP, offset));
+            currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, argOp, MipsRegister.SP, offset));
         }
 
-        // 3. 生成跳转指令
         currentMipsBlock.addInstruction(new MipsBranch("jal", funcLabel));
+        cachedV0 = -1; // 函数调用可能修改 $v0，清除缓存
 
-        // [核心修改] 不需要恢复栈指针 (addu)，因为我们根本没动它
-
-        // 4. 处理返回值
         if (!inst.getType().isVoidType()) {
-            // [Phase 2 重构] 返回值在 $v0，存入 valueMap
-            VirtualRegister dest = new VirtualRegister();
+            VirtualRegister dest = getOrCreateDestReg(inst);
             currentMipsBlock.addInstruction(new MipsMove(dest, MipsRegister.V0));
-            valueMap.put(inst, dest);
         }
     }
 
-    /**
-     * 判断是否为可内联的库函数
-     */
     private boolean isInlineableLibFunction(String funcName) {
         return funcName.equals("getint") || funcName.equals("getch") ||
                funcName.equals("putint") || funcName.equals("putch") ||
                funcName.equals("putstr");
     }
 
-    /**
-     * 内联库函数：直接生成 syscall 指令序列
-     */
     private void inlineLibFunction(String funcName, CallInst inst) {
         int syscallCode = switch (funcName) {
             case "getint" -> 5;
@@ -476,295 +441,201 @@ public class InstTranslator {
             case "putint" -> 1;
             case "putch" -> 11;
             case "putstr" -> 4;
-            default -> throw new RuntimeException("Unknown lib function: " + funcName);
+            default -> 10;
         };
 
-        // 对于 putint/putch/putstr，需要加载参数到 $a0
         if (funcName.equals("putint") || funcName.equals("putch") || funcName.equals("putstr")) {
             List<Value> args = inst.getArguments();
             if (!args.isEmpty()) {
-                // [Phase 2 重构] 使用 getOperand 加载参数
                 Operand argOp = getOperand(args.get(0));
                 currentMipsBlock.addInstruction(new MipsMove(MipsRegister.A0, argOp));
             }
         }
 
-        // 生成 syscall
-        currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, syscallCode));
+        // [Optimization] 只有当 $v0 的值不是目标 syscallCode 时才生成 li 指令
+        if (cachedV0 != syscallCode) {
+            currentMipsBlock.addInstruction(new MipsLi(MipsRegister.V0, syscallCode));
+            cachedV0 = syscallCode;
+        }
         currentMipsBlock.addInstruction(new MipsSyscall());
 
-        // 对于 getint/getch，返回值在 $v0，需要保存
         if (funcName.equals("getint") || funcName.equals("getch")) {
+            // 【关键】getint/getch 的 syscall 会将返回值写入 $v0，
+            // 因此 $v0 不再是 syscallCode，必须清除缓存！
+            cachedV0 = -1;
             if (!inst.getType().isVoidType()) {
-                // [Phase 2 重构] 返回值存入 valueMap
-                VirtualRegister dest = new VirtualRegister();
+                VirtualRegister dest = getOrCreateDestReg(inst);
                 currentMipsBlock.addInstruction(new MipsMove(dest, MipsRegister.V0));
-                valueMap.put(inst, dest);
             }
         }
     }
 
-    // === 新增：数组地址计算翻译 ===
     private void translateGep(GetElementPtrInst inst) {
-        // [Phase 2 重构] GEP 是地址计算，结果是地址（VReg）
         Value base = inst.getBasePtr();
         List<Value> indices = inst.getIndices();
-
-        // 1. 获取基地址
         Operand baseOp = getOperand(base);
-
-        // 2. 计算偏移量
         Value indexValue = indices.size() == 1 ? indices.get(0) : indices.get(indices.size() - 1);
 
-        // 3. 计算最终地址
         if (indexValue instanceof ConstantInt constIdx) {
             int offsetBytes = constIdx.getValue() * 4;
             if (offsetBytes == 0) {
-                // 无偏移，直接复用基地址
-                valueMap.put(inst, baseOp);
-                return;
+                // 检查是否已经有预分配的寄存器
+                Operand existing = valueMap.get(inst);
+                if (existing instanceof VirtualRegister destVr) {
+                    currentMipsBlock.addInstruction(new MipsMove(destVr, baseOp));
+                } else {
+                    valueMap.put(inst, baseOp);
+                }
             } else {
-                // addiu dest, base, imm
-                VirtualRegister dest = new VirtualRegister();
+                VirtualRegister dest = getOrCreateDestReg(inst);
                 currentMipsBlock.addInstruction(new MipsBinary("addiu", dest, baseOp, offsetBytes));
-                valueMap.put(inst, dest);
             }
         } else {
-            // 变量索引
             Operand indexOp = getOperand(indexValue);
             VirtualRegister shiftedIdx = new VirtualRegister();
-            VirtualRegister dest = new VirtualRegister();
-            // sll shiftedIdx, indexOp, 2 (乘以4)
+            VirtualRegister dest = getOrCreateDestReg(inst);
             currentMipsBlock.addInstruction(new MipsBinary("sll", shiftedIdx, indexOp, 2));
-            // addu dest, baseOp, shiftedIdx
             currentMipsBlock.addInstruction(new MipsBinary("addu", dest, baseOp, shiftedIdx));
-            valueMap.put(inst, dest);
         }
     }
 
-    // 处理 Zext (零扩展) 和 Trunc (截断)
-    // 在目前的 MIPS 实现中，i1 和 i32 在寄存器中存储方式相同 (0/1)，
-    // 所以只需要把源操作数的值读取出来，存入目标指令的栈位置即可。
-    private void translateZext(Instruction inst) {
-        // [Phase 2 重构] Zext/Trunc 在 MIPS 中是 no-op，直接传递 VReg
-        Operand src = getOperand(inst.getOperand(0));
-        // 直接复用同一个 VReg （后续分配器会处理）
-        valueMap.put(inst, src);
-    }
 
-    // === 核心辅助方法 ===
-
-    /**
-     * Phi 降级逻辑 (Parallel Copy):
-     * Phi 节点的值通过 Move 指令传递到目标 VReg，不再使用栈
-     * 
-     * [Critical Fix] 使用安全的 Parallel Copy 算法处理循环依赖
-     * 例如: a = phi(b), b = phi(a) 需要临时寄存器来破环
-     */
     private void processPhiNodes(BasicBlock targetBlock) {
-        // 1. 收集所有需要的 Copy 对 (src -> dest)
         java.util.List<Operand[]> copies = new java.util.ArrayList<>();
-        
         for (Instruction inst : targetBlock.getInstructions()) {
-            if (!(inst instanceof PhiInst phi)) {
-                break; // Phi 都在开头
-            }
-
-            // 查找当前 Block 在 Phi 中对应的 incoming value
+            if (!(inst instanceof PhiInst phi)) break;
             Value incomingValue = null;
             for (int i = 0; i < phi.getOperands().size(); i += 2) {
-                Value val = phi.getOperand(i);
-                BasicBlock blk = (BasicBlock) phi.getOperand(i + 1);
-
-                if (blk == this.currentLLVMBlock) {
-                    incomingValue = val;
+                if (((BasicBlock) phi.getOperand(i + 1)) == this.currentLLVMBlock) {
+                    incomingValue = phi.getOperand(i);
                     break;
                 }
             }
-
             if (incomingValue != null) {
                 Operand src = getOperand(incomingValue);
                 Operand dest = valueMap.computeIfAbsent(phi, k -> new VirtualRegister());
-                
-                // 如果 src == dest，跳过（自赋值）
-                if (!src.equals(dest)) {
-                    copies.add(new Operand[]{src, dest});
-                }
+                if (!src.equals(dest)) copies.add(new Operand[]{src, dest});
             }
         }
         
-        // 2. 使用拓扑排序 + 破环算法生成安全的 Move 序列
-        // 算法：优先处理不被其他 Copy 作为源的目标；如果存在环，用临时变量破环
-        
+        java.util.Map<Operand, Operand> srcMap = new java.util.HashMap<>();
         java.util.Set<Operand> pending = new java.util.HashSet<>();
-        java.util.Map<Operand, Operand> srcMap = new java.util.HashMap<>(); // dest -> src
         for (Operand[] copy : copies) {
-            Operand src = copy[0];
-            Operand dest = copy[1];
-            srcMap.put(dest, src);
-            pending.add(dest);
+            srcMap.put(copy[1], copy[0]);
+            pending.add(copy[1]);
         }
-        
-        // 记录哪些 Operand 是某个 Copy 的 src
-        java.util.Set<Operand> isSrcOfSomeone = new java.util.HashSet<>();
-        for (Operand[] copy : copies) {
-            isSrcOfSomeone.add(copy[0]);
-        }
-        
-        java.util.List<MipsInstruction> moveInsts = new java.util.ArrayList<>();
-        
+
         while (!pending.isEmpty()) {
-            // 找一个 dest，其 dest 不是任何其他未处理 Copy 的 src
             Operand safeToEmit = null;
             for (Operand dest : pending) {
-                // 检查 dest 是否是某个未处理 Copy 的 src
-                boolean isBlockedBySomeone = false;
+                boolean isBlocked = false;
                 for (Operand otherDest : pending) {
-                    if (!otherDest.equals(dest)) {
-                        Operand otherSrc = srcMap.get(otherDest);
-                        if (otherSrc.equals(dest)) {
-                            isBlockedBySomeone = true;
-                            break;
-                        }
+                    if (srcMap.get(otherDest).equals(dest)) {
+                        isBlocked = true;
+                        break;
                     }
                 }
-                if (!isBlockedBySomeone) {
+                if (!isBlocked) {
                     safeToEmit = dest;
                     break;
                 }
             }
-            
+
             if (safeToEmit != null) {
-                // 可以安全地生成 move dest, src
-                Operand src = srcMap.get(safeToEmit);
-                moveInsts.add(new MipsMove(safeToEmit, src));
+                currentMipsBlock.addInstruction(new MipsMove(safeToEmit, srcMap.get(safeToEmit)));
                 pending.remove(safeToEmit);
             } else {
-                // 所有剩余的都形成环！使用临时变量破环
-                // 选择一个环中的节点，保存其值到 temp
                 Operand cycleNode = pending.iterator().next();
-                Operand cycleSrc = srcMap.get(cycleNode);
-                
-                // 创建临时寄存器保存环中某个节点的原始值
                 VirtualRegister temp = new VirtualRegister();
-                moveInsts.add(new MipsMove(temp, cycleNode)); // 保存 cycleNode 的旧值
-                
-                // 处理环：从 cycleNode 开始，沿着 src 链条走
+                currentMipsBlock.addInstruction(new MipsMove(temp, cycleNode));
                 Operand current = cycleNode;
                 while (true) {
                     Operand src = srcMap.get(current);
                     if (src.equals(cycleNode)) {
-                        // 环的最后一步：使用 temp 作为 src
-                        moveInsts.add(new MipsMove(current, temp));
+                        currentMipsBlock.addInstruction(new MipsMove(current, temp));
                         pending.remove(current);
                         break;
                     } else {
-                        moveInsts.add(new MipsMove(current, src));
+                        currentMipsBlock.addInstruction(new MipsMove(current, src));
                         pending.remove(current);
-                        // 移动到环的下一个节点
-                        // 找到以 src 为 dest 的 copy
-                        boolean found = false;
-                        for (Operand nextDest : new java.util.ArrayList<>(pending)) {
-                            if (srcMap.get(nextDest) != null && nextDest.equals(src)) {
-                                // Wait, we need to find dest whose src is current's src? No.
-                                // Actually we need: find another copy where dest == src (current src becomes next dest)
-                            }
-                            // Simpler: find a copy where dest = src  (the one that uses our current dest as its src)
-                            if (srcMap.containsKey(src) && pending.contains(src)) {
-                                current = src;
-                                found = true;
-                                break;
-                            }
-                        }
-                        if (!found) {
-                            // Edge case: src is not in pending (already processed or not a dest)
-                            // This means cycleNode's src chain terminates.
-                            // But we entered here because there's a cycle, so this shouldn't happen.
-                            // Fallback: just break
-                            break;
-                        }
-                        current = src; // Move to next node in cycle
+                        current = src;
                     }
                 }
             }
         }
-        
-        // 3. 添加所有 Move 指令
-        for (MipsInstruction move : moveInsts) {
-            currentMipsBlock.addInstruction(move);
-        }
     }
 
-
-    /**
-     * [Phase 2 重构] 获取 Value 对应的 Operand
-     * 优先从 valueMap 查找，如果不存在则根据类型创建/加载
-     */
     private Operand getOperand(Value value) {
-        // 1. 常量处理
         if (value instanceof ConstantInt constantInt) {
             int val = constantInt.getValue();
-            // [优化] 常量 0 直接使用 $zero 寄存器，避免分配冲突
-            if (val == 0) {
-                return MipsRegister.ZERO;
-            }
+            if (val == 0) return MipsRegister.ZERO;
             VirtualRegister vreg = new VirtualRegister();
             currentMipsBlock.addInstruction(new MipsLi(vreg, val));
             return vreg;
         }
         
-        // 2. 全局变量：加载地址到新 VReg
-        if (value instanceof GlobalVariable globalVar) {
-            String label = globalVar.getName().substring(1);
+        if (value instanceof GlobalValue global) {
+            String name = global.getName().substring(1);
+            if (globalAddrCache.containsKey(name)) return globalAddrCache.get(name);
+            
             VirtualRegister vreg = new VirtualRegister();
-            currentMipsBlock.addInstruction(new MipsLa(vreg, label));
+            currentMipsBlock.addInstruction(new MipsLa(vreg, name));
+            
+            // [Optimization] 限制缓存大小，防止寄存器溢出 (Spill)
+            // 如果缓存超过 12 个，不再缓存，直接退化为每次生成 la
+            if (globalAddrCache.size() < 12) {
+                globalAddrCache.put(name, vreg);
+            }
             return vreg;
         }
-        
-        // 3. AllocaInst：加载栈地址到新 VReg
+
         if (value instanceof AllocaInst) {
             int offset = stackManager.getOffset(value);
             VirtualRegister vreg = new VirtualRegister();
             currentMipsBlock.addInstruction(new MipsBinary("addiu", vreg, MipsRegister.SP, offset));
             return vreg;
         }
-        
-        // 4. 其他指令结果：从 valueMap 获取
-        if (valueMap.containsKey(value)) {
-            return valueMap.get(value);
-        }
-        
-        // 5. Fallback: 可能是 Argument，从栈加载
-        // (Arguments 在 StackManager 中有栈槽)
-        // [Optimization] Check Local Cache First (Reset per Block)
-        if (currentMipsBlock != lastVisitedBlock) {
-            localArgCache.clear();
-            lastVisitedBlock = currentMipsBlock;
-        }
-        if (localArgCache.containsKey(value)) {
-            return localArgCache.get(value);
+
+        if (valueMap.containsKey(value)) return valueMap.get(value);
+
+        // [Critical Fix] 处理跨基本块的值引用：
+        // 如果一个 Instruction 定义在其他块中，并且还没有被翻译，
+        // 我们需要预先为它分配一个虚拟寄存器，后续翻译该指令时会使用这个寄存器。
+        if (value instanceof Instruction inst && !(inst instanceof AllocaInst)) {
+            VirtualRegister vreg = new VirtualRegister();
+            valueMap.put(value, vreg);
+            return vreg;
         }
 
-        try {
-            int offset = stackManager.getOffset(value);
-            VirtualRegister vreg = new VirtualRegister();
-            currentMipsBlock.addInstruction(new MipsLoadStore(
-                MipsLoadStore.Type.LW, vreg, MipsRegister.SP, offset));
-            
-            // [Fix] Do NOT cache Argument VReg GLOBALLY! 
-            // Caching here causes Def-Use dominance issues.
-            // But caching LOCALLY within a block is safe and efficient.
-            localArgCache.put(value, vreg);
-            
-            return vreg;
-        } catch (RuntimeException e) {
-            throw new RuntimeException("getOperand: Cannot resolve value: " + value + 
-                " (type: " + value.getClass().getSimpleName() + ")", e);
+        if (value instanceof Argument arg) {
+            if (localArgCache.containsKey(value)) return localArgCache.get(value);
+            try {
+                int offset = stackManager.getOffset(value);
+                VirtualRegister vreg = new VirtualRegister();
+                currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, vreg, MipsRegister.SP, offset));
+                localArgCache.put(value, vreg);
+                return vreg;
+            } catch (Exception e) {
+                // Ignore and throw later
+            }
         }
+        throw new RuntimeException("getOperand: Cannot resolve value: " + value);
     }
 
-    // [已删除] loadValueToRegister 和 saveRegisterToStack
-    // 这些使用硬编码物理寄存器的方法已被 getOperand + VirtualRegister 替代
+    /**
+     * [Critical Fix] 获取或创建指令的目标虚拟寄存器。
+     * 如果指令的值之前已经被其他块提前引用并分配了虚拟寄存器，则复用那个寄存器；
+     * 否则创建新的虚拟寄存器并记录到 valueMap。
+     */
+    private VirtualRegister getOrCreateDestReg(Instruction inst) {
+        Operand existing = valueMap.get(inst);
+        if (existing instanceof VirtualRegister vr) {
+            return vr;
+        }
+        VirtualRegister vreg = new VirtualRegister();
+        valueMap.put(inst, vreg);
+        return vreg;
+    }
 
     private String makeLabel(BasicBlock bb) {
         return bb.getParentFunction().getName().substring(1) + "_" + bb.getName();

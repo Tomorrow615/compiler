@@ -161,7 +161,7 @@ public class LICM implements Pass {
         List<Instruction> instructions = new ArrayList<>(header.getInstructions());
         for (Instruction inst : instructions) {
             if (!(inst instanceof PhiInst phi)) {
-                break; // Phi 都在开头
+                continue; // 【修复】移除 break，继续遍历以处理所有 Phi
             }
             
             // 收集外部前驱的输入值映射

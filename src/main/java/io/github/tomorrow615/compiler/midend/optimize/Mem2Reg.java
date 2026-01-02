@@ -387,9 +387,13 @@ public class Mem2Reg implements Pass {
                             toRemove.add(phi);
                             changed = true;
                         }
-                    } else {
-                        break; // Phi 都在块开头
                     }
+                    // 【修复】移除 break，继续遍历所有指令
+                    // 内联后 Phi 可能不在块开头
+                }
+                // 【修复】删除 Phi 前必须断开 Use-Def 链
+                for (Instruction inst : toRemove) {
+                    inst.removeUseFromOperands();
                 }
                 bb.getInstructions().removeAll(toRemove);
             }
