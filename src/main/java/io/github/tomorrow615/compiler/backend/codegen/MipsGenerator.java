@@ -1,6 +1,7 @@
 package io.github.tomorrow615.compiler.backend.codegen;
 
 import io.github.tomorrow615.compiler.backend.regalloc.GraphColoringAllocator;
+import io.github.tomorrow615.compiler.backend.mips.optimize.BlockLayout;
 import io.github.tomorrow615.compiler.backend.mips.MipsModule;
 import io.github.tomorrow615.compiler.backend.mips.MipsRegister;
 import io.github.tomorrow615.compiler.backend.mips.assembly.*;
@@ -15,6 +16,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.PointerType;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
 import io.github.tomorrow615.compiler.midend.llvm.value.Constant;
+import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -47,6 +49,11 @@ public class MipsGenerator {
         
         // 5. 窥孔优化 (寄存器分配后)
         new PeepholeOptimizer(mipsModule).optimize();
+        
+        // 6. 基本块布局优化 (减少无条件跳转)
+        if (io.github.tomorrow615.compiler.util.Config.ENABLE_BLOCK_LAYOUT) {
+            new BlockLayout(mipsModule).optimize();
+        }
 
         return mipsModule;
     }
@@ -170,6 +177,11 @@ public class MipsGenerator {
         // 2. 栈帧分析 (Pre-Scan)
         StackManager stackManager = new StackManager(func);
         mipsFunc.setStackManager(stackManager); // [Fix] 绑定 StackManager
+        
+        // [Zombie Stack] main 函数不需要保存 $ra（通过 syscall 10 退出）
+        if (Config.ENABLE_MAIN_NO_STACK && funcName.equals("main")) {
+            stackManager.setNoSaveRa(true);
+        }
 
         // 3. 构建函数序言 (Prologue) -> 放入入口基本块
         // 我们创建一个名为 "funcName_entry" 的 MipsBasicBlock
@@ -183,8 +195,13 @@ public class MipsGenerator {
         }
 
         // 3.2 保存 $ra: sw $ra, raOffset($sp)
-        int raOffset = stackManager.getRaOffset();
-        entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.RA, MipsRegister.SP, raOffset));
+        // [Phase 2 Optimization] main 函数不需要保存 $ra，因为它通过 syscall 10 退出
+        if (Config.ENABLE_MAIN_NO_STACK && funcName.equals("main")) {
+            // Skip save $ra
+        } else {
+            int raOffset = stackManager.getRaOffset();
+            entryBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.SW, MipsRegister.RA, MipsRegister.SP, raOffset));
+        }
 
         // 3.3 保存参数 (Arguments) 到栈上
         // 策略：为了统一后续处理，我们将寄存器传来的参数 ($a0-$a3) 立即存入栈中 StackManager 分配的位置

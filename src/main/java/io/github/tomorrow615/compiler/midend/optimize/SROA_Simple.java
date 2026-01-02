@@ -5,6 +5,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.ArrayType;
 import io.github.tomorrow615.compiler.midend.llvm.type.IntegerType;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
+import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.*;
 
@@ -14,8 +15,6 @@ import java.util.*;
  * 作用：拆解后，Mem2Reg 可以将这些变量提升到寄存器，消除 MEM 代价。
  */
 public class SROA_Simple implements Pass {
-
-    private static final int MAX_ARRAY_SIZE = 64; // 数组大小阈值
 
     @Override
     public String getName() {
@@ -57,7 +56,7 @@ public class SROA_Simple implements Pass {
         
         // 4. 数组大小不能太大
         int size = arrayType.getNumElements();
-        if (size > MAX_ARRAY_SIZE || size <= 0) {
+        if (size > Config.MAX_ARRAY_SIZE || size <= 0) {
             return; 
         }
 

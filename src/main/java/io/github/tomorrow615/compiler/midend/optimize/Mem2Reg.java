@@ -95,8 +95,12 @@ public class Mem2Reg implements Pass {
     private boolean isPromotable(AllocaInst alloca) {
         Type allocatedType = alloca.getAllocatedType();
 
-        // 只处理 i32 类型
-        if (!(allocatedType instanceof IntegerType intType) || intType.getBitWidth() != 32) {
+        // 只处理 i32 类型 或 指针类型
+        if (allocatedType instanceof IntegerType intType) {
+            if (intType.getBitWidth() != 32) return false;
+        } else if (allocatedType instanceof io.github.tomorrow615.compiler.midend.llvm.type.PointerType) {
+            // allows pointers
+        } else {
             return false;
         }
 

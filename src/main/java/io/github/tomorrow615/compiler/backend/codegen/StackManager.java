@@ -28,6 +28,7 @@ public class StackManager {
     private int stackSize;
     private int bottomReserve;  // 栈底预留空间
     private int outgoingArgsSize;  // 预留给函数调用参数的空间
+    private boolean noSaveRa = false;  // [Zombie Stack] main 函数不保存 $ra
 
     public StackManager(Function function) {
         this.valueOffsetMap = new HashMap<>();
@@ -128,9 +129,19 @@ public class StackManager {
 
     /**
      * 获取栈帧大小（包含所有变量 + $ra，最小 32 字节，8 字节对齐）
+     * [Zombie Stack] 如果 noSaveRa 为 true 且栈上没有任何数据，返回 0
      */
     public int getFrameSize() {
-        int size = stackSize + 4; // +4 for $ra
+        // [Zombie Stack] 如果不需要保存 $ra，且栈上没有任何数据 (stackSize == 0)
+        // 则返回 0，完全消除栈帧
+        if (noSaveRa && stackSize == 0) {
+            return 0;
+        }
+        
+        int size = stackSize;
+        if (!noSaveRa) {
+            size += 4; // +4 for $ra
+        }
         size = Math.max(size, 32);
         // 8 字节对齐
         if (size % 8 != 0) {
@@ -152,5 +163,13 @@ public class StackManager {
      */
     public int getOutgoingArgsSize() {
         return outgoingArgsSize;
+    }
+    
+    /**
+     * [Zombie Stack] 设置是否跳过 $ra 保存
+     * 适用于 main 函数（通过 syscall 10 退出，无需返回）
+     */
+    public void setNoSaveRa(boolean noSaveRa) {
+        this.noSaveRa = noSaveRa;
     }
 }

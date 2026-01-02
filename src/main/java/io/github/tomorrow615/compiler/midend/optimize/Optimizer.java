@@ -40,6 +40,12 @@ public class Optimizer {
                 // 循环展开（由 AGGRESSIVE_MODE 内部控制）
                 runPass(module, new LoopUnrolling());
                 
+                // [Phase 4] 循环展开后立即进行标量替换和 SSA 提升
+                // 目的：将展开后的数组访问 (alloca [N x i32]) 彻底转化为寄存器操作
+                if (Config.OPT_SROA) runPass(module, new SROA_Simple());
+                if (Config.OPT_MEM2REG) runPass(module, new Mem2Reg());
+                if (Config.OPT_GVN) runPass(module, new GVN());
+                
                 // Unroll 之后必须清理 CFG 和死代码
                 if (Config.OPT_SIMPLIFY_CFG) runPass(module, new SimplifyCFG());
                 if (Config.OPT_DCE) runPass(module, new DeadCodeElimination());

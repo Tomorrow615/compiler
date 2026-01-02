@@ -13,6 +13,7 @@ import io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsBasicBlock;
 import io.github.tomorrow615.compiler.backend.mips.structure.MipsFunction;
 import io.github.tomorrow615.compiler.backend.mips.assembly.MipsLi;
+import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.*;
 
@@ -828,6 +829,12 @@ public class GraphColoringAllocator {
         }
 
         // --- Step 4.3: CSR Support (Callee-Saved Registers) ---
+        // [Phase 2 Optimization] main 函数不需要保存/恢复 Callee-Saved Registers
+        // 因为程序结束后不需要恢复上下文
+        if (Config.ENABLE_MAIN_NO_STACK && func.getName().equals("main")) {
+            return;
+        }
+        
         // Identify used $s registers
         Set<MipsRegister> usedS = new HashSet<>();
         for (MipsRegister reg : color.values()) {

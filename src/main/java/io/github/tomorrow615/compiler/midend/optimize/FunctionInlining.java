@@ -3,6 +3,7 @@ package io.github.tomorrow615.compiler.midend.optimize;
 import io.github.tomorrow615.compiler.midend.llvm.Module;
 import io.github.tomorrow615.compiler.midend.llvm.instruction.*;
 import io.github.tomorrow615.compiler.midend.llvm.value.*;
+import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -17,12 +18,6 @@ import java.util.stream.Collectors;
  */
 public class FunctionInlining implements Pass {
 
-    // 激进的内联阈值：允许内联较大的函数
-    private static final int INLINE_THRESHOLD = 100;
-    
-    // Caller 体积保护：防止单个函数过大导致寄存器分配崩溃
-    private static final int MAX_CALLER_SIZE = 10000;
-    
     // 内联计数器（静态，确保多轮迭代时唯一性）
     private static int inlineCounter = 0;
 
@@ -66,7 +61,7 @@ public class FunctionInlining implements Pass {
             if (caller == null) continue;
             
             // 【安全检查】再次检查 caller 大小，防止前面的内联导致 caller 过大
-            if (countInstructions(caller) > MAX_CALLER_SIZE) continue;
+            if (countInstructions(caller) > Config.MAX_CALLER_SIZE) continue;
             
             performInline(call);
             inlineCount++;
@@ -107,11 +102,11 @@ public class FunctionInlining implements Pass {
         
         // 4. Caller 体积保护（防止爆炸的最后一道防线）
         int callerSize = countInstructions(caller);
-        if (callerSize > MAX_CALLER_SIZE) return false;
+        if (callerSize > Config.MAX_CALLER_SIZE) return false;
         
         // 5. Callee 大小限制
         int calleeSize = countInstructions(callee);
-        return calleeSize < INLINE_THRESHOLD;
+        return calleeSize < Config.INLINE_THRESHOLD;
     }
     
     /**

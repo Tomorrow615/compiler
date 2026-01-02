@@ -11,13 +11,12 @@ import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.*;
 
+import static io.github.tomorrow615.compiler.util.Config.MAX_TRIP_COUNT;
+
 /**
  * 循环展开 Pass (Loop Unrolling) - Final Robust Version
  */
 public class LoopUnrolling implements Pass {
-
-    private static final int MAX_TRIP_COUNT = 64; 
-    private static final int MAX_TOTAL_INSTRUCTIONS = 4000;
 
     @Override
     public String getName() {
@@ -59,7 +58,7 @@ public class LoopUnrolling implements Pass {
         int bodySize = countLoopBodyInstructions(loop);
         long totalInsts = (long) tripInfo.tripCount * bodySize;
 
-        if (tripInfo.tripCount <= MAX_TRIP_COUNT && totalInsts <= MAX_TOTAL_INSTRUCTIONS) {
+        if (tripInfo.tripCount <= MAX_TRIP_COUNT && totalInsts <= Config.MAX_UNROLL_INSTRUCTIONS) {
             fullUnroll(loop, tripInfo, function);
         }
     }

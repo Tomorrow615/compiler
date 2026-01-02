@@ -12,6 +12,7 @@ import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.backend.mips.operand.Operand;
 import io.github.tomorrow615.compiler.backend.mips.operand.VirtualRegister;
 import io.github.tomorrow615.compiler.midend.optimize.MagicNumber;
+import io.github.tomorrow615.compiler.util.Config;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -137,8 +138,13 @@ public class InstTranslator {
             currentMipsBlock.addInstruction(new MipsMove(MipsRegister.V0, retVal));
         }
 
-        int raOffset = stackManager.getRaOffset();
-        currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, MipsRegister.RA, MipsRegister.SP, raOffset));
+        // [Phase 2 Optimization] main 函数不需要恢复 $ra
+        if (Config.ENABLE_MAIN_NO_STACK && mipsFunction.getName().equals("main")) {
+            // Do nothing for main if optimization enabled
+        } else {
+            int raOffset = stackManager.getRaOffset();
+            currentMipsBlock.addInstruction(new MipsLoadStore(MipsLoadStore.Type.LW, MipsRegister.RA, MipsRegister.SP, raOffset));
+        }
 
         int frameSize = stackManager.getFrameSize();
         if (frameSize > 0) {
@@ -154,9 +160,15 @@ public class InstTranslator {
     }
 
     private void translateBinary(BinaryOpInst inst) {
+        VirtualRegister dest = getOrCreateDestReg(inst);
+
+        // [Phase 1 Optimization] 尝试立即数优化
+        if (Config.ENABLE_BACKEND_IMM_OPT && tryImmediateOptimization(inst, dest)) {
+            return;
+        }
+
         Operand lhs = getOperand(inst.getLhs());
         Operand rhs = getOperand(inst.getRhs());
-        VirtualRegister dest = getOrCreateDestReg(inst);
 
         if (inst.getOp() == BinaryOpInst.OpCode.SDIV && inst.getRhs() instanceof ConstantInt constDiv) {
             int divisor = constDiv.getValue();
@@ -172,9 +184,21 @@ public class InstTranslator {
             currentMipsBlock.addInstruction(new MipsBinary("div", lhs, rhs));
             currentMipsBlock.addInstruction(new MipsBinary("mfhi", dest));
         } else if (inst.getOp() == BinaryOpInst.OpCode.SHL) {
-            currentMipsBlock.addInstruction(new MipsBinary("sllv", dest, lhs, rhs));
+            // [Shift Optimization] 如果移位量是常数 (0-31)，直接生成 sll 立即数指令
+            if (inst.getRhs() instanceof ConstantInt shiftAmt && isShiftImm5(shiftAmt.getValue())) {
+                Operand lhsOp = getOperand(inst.getLhs());
+                currentMipsBlock.addInstruction(new MipsBinary("sll", dest, lhsOp, shiftAmt.getValue()));
+            } else {
+                currentMipsBlock.addInstruction(new MipsBinary("sllv", dest, lhs, rhs));
+            }
         } else if (inst.getOp() == BinaryOpInst.OpCode.ASHR) {
-            currentMipsBlock.addInstruction(new MipsBinary("srav", dest, lhs, rhs));
+            // [Shift Optimization] 如果移位量是常数 (0-31)，直接生成 sra 立即数指令
+            if (inst.getRhs() instanceof ConstantInt shiftAmt && isShiftImm5(shiftAmt.getValue())) {
+                Operand lhsOp = getOperand(inst.getLhs());
+                currentMipsBlock.addInstruction(new MipsBinary("sra", dest, lhsOp, shiftAmt.getValue()));
+            } else {
+                currentMipsBlock.addInstruction(new MipsBinary("srav", dest, lhs, rhs));
+            }
         } else {
             String op = switch (inst.getOp()) {
                 case ADD -> "addu";
@@ -186,6 +210,89 @@ public class InstTranslator {
             };
             currentMipsBlock.addInstruction(new MipsBinary(op, dest, lhs, rhs));
         }
+    }
+
+    /**
+     * [Phase 1] 立即数优化
+     * 针对 ADD/SUB/AND/OR/XOR，如果右操作数是小常数，直接生成 I-Type 指令
+     * 
+     * @return true 如果成功应用优化，false 则回退到通用路径
+     */
+    private boolean tryImmediateOptimization(BinaryOpInst inst, VirtualRegister dest) {
+        Value lhsVal = inst.getLhs();
+        Value rhsVal = inst.getRhs();
+
+        // 只处理右操作数是常数的情况
+        if (!(rhsVal instanceof ConstantInt constInt)) {
+            return false;
+        }
+
+        int immVal = constInt.getValue();
+        BinaryOpInst.OpCode opCode = inst.getOp();
+
+        switch (opCode) {
+            case ADD -> {
+                // addiu: 16位有符号立即数 [-32768, 32767]
+                if (isSignedImm16(immVal)) {
+                    Operand lhs = getOperand(lhsVal);
+                    currentMipsBlock.addInstruction(new MipsBinary("addiu", dest, lhs, immVal));
+                    return true;
+                }
+            }
+            case SUB -> {
+                // sub r1, r2, const -> addiu r1, r2, -const
+                // 注意: Integer.MIN_VALUE 取反会溢出，必须排除
+                if (immVal != Integer.MIN_VALUE) {
+                    int negImm = -immVal;
+                    if (isSignedImm16(negImm)) {
+                        Operand lhs = getOperand(lhsVal);
+                        currentMipsBlock.addInstruction(new MipsBinary("addiu", dest, lhs, negImm));
+                        return true;
+                    }
+                }
+            }
+            case AND -> {
+                // andi: 16位无符号立即数 [0, 65535]
+                if (isUnsignedImm16(immVal)) {
+                    Operand lhs = getOperand(lhsVal);
+                    currentMipsBlock.addInstruction(new MipsBinary("andi", dest, lhs, immVal));
+                    return true;
+                }
+            }
+            case OR -> {
+                // ori: 16位无符号立即数 [0, 65535]
+                if (isUnsignedImm16(immVal)) {
+                    Operand lhs = getOperand(lhsVal);
+                    currentMipsBlock.addInstruction(new MipsBinary("ori", dest, lhs, immVal));
+                    return true;
+                }
+            }
+            default -> {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 检查值是否在 16位有符号整数范围内 [-32768, 32767]
+     */
+    private boolean isSignedImm16(int val) {
+        return val >= -32768 && val <= 32767;
+    }
+
+    /**
+     * 检查值是否在 16位无符号整数范围内 [0, 65535]
+     */
+    private boolean isUnsignedImm16(int val) {
+        return val >= 0 && val <= 65535;
+    }
+
+    /**
+     * 检查值是否在移位立即数范围内 [0, 31]
+     */
+    private boolean isShiftImm5(int val) {
+        return val >= 0 && val <= 31;
     }
 
     private boolean translateDivByMagicNumber(BinaryOpInst inst, Operand lhsOp, int divisor) {

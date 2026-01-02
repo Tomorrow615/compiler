@@ -53,6 +53,11 @@ public class PeepholeOptimizer {
         for (MipsBasicBlock block : blocks) {
             optimizeBlock(block);
         }
+        
+        // [Move Optimization] 优化 5: 消除计算后的冗余 move 指令
+        for (MipsBasicBlock block : blocks) {
+            optimizeMoves(block);
+        }
     }
 
     /**
@@ -140,5 +145,144 @@ public class PeepholeOptimizer {
         // 替换指令列表
         insts.clear();
         insts.addAll(newInsts);
+    }
+    
+    /**
+     * [Move Optimization] 消除计算后的冗余 move 指令
+     * 
+     * 模式匹配：
+     * 1. 指令 A: 计算指令（目标寄存器为 $t0-$t9）
+     * 2. 指令 B: move 指令（源 == A.dest，目标为 $a0-$a3）
+     * 3. A 和 B 必须紧邻
+     * 4. A.dest 在 B 之后不再被使用
+     * 
+     * 优化动作：
+     * - 将 A 的目标寄存器修改为 B 的目标寄存器
+     * - 删除 B
+     */
+    private void optimizeMoves(MipsBasicBlock block) {
+        List<MipsInstruction> insts = block.getInstructions();
+        List<MipsInstruction> toRemove = new ArrayList<>();
+        
+        for (int i = 0; i < insts.size() - 1; i++) {
+            MipsInstruction instA = insts.get(i);
+            MipsInstruction instB = insts.get(i + 1);
+            
+            // 检查模式
+            if (!isComputeInstruction(instA)) continue;
+            if (!(instB instanceof MipsMove)) continue;
+            
+            // 获取指令 A 的目标寄存器
+            List<Operand> defsA = instA.getDef();
+            if (defsA.isEmpty()) continue;
+            Operand destA = defsA.get(0);
+            
+            // 检查 A 的目标是否为临时寄存器 $t0-$t9
+            if (!isTempRegister(destA)) continue;
+            
+            // 获取 move 指令的 src 和 dest
+            MipsMove move = (MipsMove) instB;
+            List<Operand> moveDefs = move.getDef();
+            List<Operand> moveUses = move.getUse();
+            
+            if (moveDefs.isEmpty() || moveUses.isEmpty()) continue;
+            
+            Operand moveSrc = moveUses.get(0);
+            Operand moveDest = moveDefs.get(0);
+            
+            // 检查 move 的源是否等于 A 的目标
+            if (!moveSrc.equals(destA)) continue;
+            
+            // 检查 move 的目标是否为参数寄存器 $a0-$a3
+            if (!isArgRegister(moveDest)) continue;
+            
+            // 安全检查：确保 destA 在 move 之后不再被使用
+            if (isRegisterUsedAfter(destA, i + 2, insts)) continue;
+            
+            // 执行优化：修改 A 的目标寄存器为 move 的目标寄存器
+            instA.replaceDef(destA, moveDest);
+            
+            // 标记 move 指令待删除
+            toRemove.add(instB);
+            removedCount++;
+        }
+        
+        // 删除标记的指令
+        insts.removeAll(toRemove);
+    }
+    
+    /**
+     * 检查指令是否为计算指令（支持直接修改目标寄存器的指令）
+     */
+    private boolean isComputeInstruction(MipsInstruction inst) {
+        if (inst instanceof MipsBinary binary) {
+            String op = binary.getOp();
+            // 排除无目标寄存器的指令（如 div, mult）
+            if (op.equals("div") || op.equals("mult")) {
+                return false;
+            }
+            // 排除 mflo/mfhi（虽然有目标，但通常紧跟 div/mult，不适合优化）
+            if (op.equals("mflo") || op.equals("mfhi")) {
+                return false;
+            }
+            return true;
+        }
+        // 可以根据需要添加其他指令类型（如 MipsLoadStore 的 lw）
+        if (inst instanceof MipsLi) {
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * 检查操作数是否为临时寄存器 $t0-$t9
+     */
+    private boolean isTempRegister(Operand operand) {
+        if (!(operand instanceof io.github.tomorrow615.compiler.backend.mips.MipsRegister)) {
+            return false;
+        }
+        io.github.tomorrow615.compiler.backend.mips.MipsRegister reg = 
+            (io.github.tomorrow615.compiler.backend.mips.MipsRegister) operand;
+        int id = reg.getId();
+        // $t0-$t7: id 8-15, $t8-$t9: id 24-25
+        return (id >= 8 && id <= 15) || (id >= 24 && id <= 25);
+    }
+    
+    /**
+     * 检查操作数是否为参数寄存器 $a0-$a3
+     */
+    private boolean isArgRegister(Operand operand) {
+        if (!(operand instanceof io.github.tomorrow615.compiler.backend.mips.MipsRegister)) {
+            return false;
+        }
+        io.github.tomorrow615.compiler.backend.mips.MipsRegister reg = 
+            (io.github.tomorrow615.compiler.backend.mips.MipsRegister) operand;
+        int id = reg.getId();
+        // $a0-$a3: id 4-7
+        return id >= 4 && id <= 7;
+    }
+    
+    /**
+     * 检查寄存器在指定位置之后是否还被使用（活跃性检查）
+     */
+    private boolean isRegisterUsedAfter(Operand reg, int startIdx, List<MipsInstruction> insts) {
+        for (int i = startIdx; i < insts.size(); i++) {
+            MipsInstruction inst = insts.get(i);
+            
+            // 检查是否在 Use 列表中
+            for (Operand use : inst.getUse()) {
+                if (use.equals(reg)) {
+                    return true;
+                }
+            }
+            
+            // 如果寄存器被重新定义（Def），则之后的使用与我们无关
+            for (Operand def : inst.getDef()) {
+                if (def.equals(reg)) {
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 }
