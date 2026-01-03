@@ -37,6 +37,16 @@ public abstract class Instruction extends User {
         this.parentBlock = parentBlock;
     }
 
+    /**
+     * 将指令从基本块中移除，并断开操作数连接
+     */
+    public void remove() {
+        if (parentBlock != null) {
+            parentBlock.removeInstruction(this);
+        }
+        removeUseFromOperands();
+    }
+
     @Override
     public abstract String toString(SlotTracker tracker);
 

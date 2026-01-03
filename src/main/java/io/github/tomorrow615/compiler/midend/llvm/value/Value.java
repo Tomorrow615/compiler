@@ -47,6 +47,16 @@ public abstract class Value {
     }
 
     /**
+     * 将所有使用此 Value 的地方替换为新的 Value
+     */
+    public void replaceAllUsesWith(Value newValue) {
+        List<Use> usesCopy = new ArrayList<>(this.users);
+        for (Use use : usesCopy) {
+            use.setValue(newValue);
+        }
+    }
+
+    /**
      * 获取所有使用此 Value 的 User 列表
      * 用于优化分析（如死代码删除）
      */

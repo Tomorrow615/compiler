@@ -28,6 +28,10 @@ public class Module {
         this.globalVariables.add(gv);
     }
 
+    public void removeGlobalVariable(GlobalVariable gv) {
+        this.globalVariables.remove(gv);
+    }
+
     public void addFunction(Function func) {
         this.functions.add(func);
     }

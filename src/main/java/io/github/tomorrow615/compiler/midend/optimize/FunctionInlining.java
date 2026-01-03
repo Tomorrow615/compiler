@@ -50,7 +50,7 @@ public class FunctionInlining implements Pass {
         }
 
         // 【修复】限制每轮内联的数量，防止单轮内联过多导致代码膨胀
-        int MAX_INLINES_PER_ROUND = 50;
+        int MAX_INLINES_PER_ROUND = Config.MAX_INLINES_PER_ROUND;
         int inlineCount = 0;
         
         // 执行内联（只展开一层）

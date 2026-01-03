@@ -13,9 +13,10 @@ import java.util.*;
 /**
  * 全局变量本地化 Pass
  * 
+ * 
  * 分为两种模式：
  * 1. 基本模式 (OPT_GLOBAL2LOCAL): 针对叶子函数的 i32 标量全局变量本地化
- * 2. 激进模式 (AGGRESSIVE_MODE): 额外支持 main 函数的数组全局变量本地化
+ * 2. Main函数优化: 额外支持 main 函数的数组全局变量本地化（无需回写）
  */
 public class Global2Local implements Pass {
 
@@ -75,7 +76,7 @@ public class Global2Local implements Pass {
      *    - 必须写回（多次调用时正确）
      *    - 安全，适用于所有场景
      * 
-     * 2. 【高风险】AGGRESSIVE_MODE: main 函数 + i32 标量/数组
+     * 2. 【高风险】Main 函数: i32 标量/数组
      *    - 使用 Constant 初始化（优化 MEM）
      *    - 可跳过写回（main 只运行一次）
      *    - 需要 Call Chain 检查（防止 caller-callee 冲突）
@@ -127,13 +128,13 @@ public class Global2Local implements Pass {
 
         // === 基本模式：叶子函数 + i32 标量 ===
         // 条件安全：叶子函数不会调用其他函数，全局变量不会被外部观察
-        if (Config.OPT_GLOBAL2LOCAL && isScalar && isLeafFunction(func)) {
+        if (isScalar && isLeafFunction(func)) {
             return true;
         }
 
         // === 激进模式：main 函数 + i32 标量/数组 ===
         // 条件：仅 main 函数（内联后的大 main），配合 SROA/Mem2Reg
-        if (Config.AGGRESSIVE_MODE && func.getName().equals("@main")) {
+        if (func.getName().equals("@main")) {
             // [Phase 3 Safety] 检查 Call Chain：如果 main 调用的函数使用了该全局变量，禁止本地化
             if (isGlobalUsedInCallChain(func, gv, new HashSet<>())) {
                 return false;
@@ -222,7 +223,7 @@ public class Global2Local implements Pass {
             replaceUsers(func, gv, localAlloca);
             
             // [低风险 vs 高风险] 区分初始化策略
-            boolean isMainAggressive = Config.AGGRESSIVE_MODE && func.getName().equals("@main");
+            boolean isMainAggressive = func.getName().equals("@main");
             
             if (isMainAggressive) {
                 // 【高风险模式】Main 函数：直接用 Constant 初始化（只跑一次，安全）
@@ -252,7 +253,7 @@ public class Global2Local implements Pass {
             replaceUsers(func, gv, localAlloca);
             
             // [低风险 vs 高风险] 区分初始化策略
-            boolean isMainAggressive = Config.AGGRESSIVE_MODE && func.getName().equals("@main");
+            boolean isMainAggressive = func.getName().equals("@main");
             
             if (isMainAggressive) {
                 // 【高风险模式】Main 函数：直接用 Constant 初始化
@@ -312,7 +313,7 @@ public class Global2Local implements Pass {
 
         // 3. 写回
         // 【激进优化】main 函数结束后程序就退出了，可以跳过写回
-        if (Config.AGGRESSIVE_MODE && func.getName().equals("@main")) {
+        if (func.getName().equals("@main")) {
             return;
         }
         

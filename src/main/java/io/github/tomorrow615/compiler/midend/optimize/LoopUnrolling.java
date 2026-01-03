@@ -15,6 +15,7 @@ import static io.github.tomorrow615.compiler.util.Config.MAX_TRIP_COUNT;
 
 /**
  * 循环展开 Pass (Loop Unrolling) - Final Robust Version
+ * Controlled by Config.OPT_LOOP_UNROLL
  */
 public class LoopUnrolling implements Pass {
 
@@ -26,7 +27,7 @@ public class LoopUnrolling implements Pass {
     @Override
     public void runOnFunction(Function function) {
         // 仅在激进模式下启用循环展开
-        if (!Config.AGGRESSIVE_MODE) return;
+        if (!Config.OPT_LOOP_UNROLL) return;
         
         if (function.isDeclaration() || function.getBasicBlocks().isEmpty()) return;
 

@@ -46,6 +46,10 @@ public class BasicBlock extends Value {
         this.instructions.add(inst);
     }
 
+    public void removeInstruction(Instruction inst) {
+        this.instructions.remove(inst);
+    }
+
     // === CFG 方法 ===
     public List<BasicBlock> getPredecessors() {
         return predecessors;
