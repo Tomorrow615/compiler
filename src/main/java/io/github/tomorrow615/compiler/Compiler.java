@@ -32,6 +32,7 @@ public class Compiler {
 
         String outputFileLlvmIr = "llvm_ir.txt";
         String outputFileLlvmIrOpt = "llvm_ir2.txt";
+        String outputFileMipsRaw = "mips_raw.txt";
         String outputFileMips = "mips.txt";
 
         try {
@@ -76,6 +77,15 @@ public class Compiler {
             Module llvmModule = irGenerator.generate();
             try (IRPrinter irPrinter = new IRPrinter(outputFileLlvmIr)) {
                 irPrinter.print(llvmModule);
+            }
+
+            // --- 步骤 5.5: 基础 IR 对应的 MIPS 生成 (优化前) ---
+            if (Config.GENERATE_MIPS) {
+                MipsGenerator mipsGenerator = new MipsGenerator(llvmModule);
+                MipsModule mipsModule = mipsGenerator.generate();
+                try (MipsPrinter mipsPrinter = new MipsPrinter(outputFileMipsRaw)) {
+                    mipsPrinter.print(mipsModule);
+                }
             }
 
             // --- 步骤 6: LLVM IR 优化 ---

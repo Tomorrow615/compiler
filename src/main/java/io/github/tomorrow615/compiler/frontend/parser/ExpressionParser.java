@@ -71,11 +71,13 @@ public class ExpressionParser {
     }
 
     // 一元表达式 UnaryExp → PrimaryExp | Ident '(' [FuncRParams] ')' | UnaryOp UnaryExp // j
+    // [NEW2] UnaryOp → '+' | '−' | '!' | '++'
     public UnaryExpNode parseUnaryExp() {
         UnaryExpNode node;
         if (mainParser.peek().getType() == TokenType.PLUS ||
                 mainParser.peek().getType() == TokenType.MINU ||
-                mainParser.peek().getType() == TokenType.NOT) {
+                mainParser.peek().getType() == TokenType.NOT
+                /* [NEW2] || mainParser.peek().getType() == TokenType.INCR */) {
             UnaryOpNode opNode = this.parseUnaryOp();
             UnaryExpNode exp = parseUnaryExp();
             node = new UnaryExpNode(opNode, exp);
@@ -110,6 +112,8 @@ public class ExpressionParser {
     }
 
     // 乘除模表达式 MulExp → UnaryExp | MulExp ('*' | '/' | '%') UnaryExp
+    // [NEW] MulExp → UnaryExp | MulExp ('*' | '/' | '%' | 'bitand') UnaryExp
+    // [NEW3] MulExp → UnaryExp | MulExp ('*' | '/' | '%' | '**') UnaryExp
     public MulExpNode parseMulExp() {
         List<UnaryExpNode> exps = new ArrayList<>();
         List<Token> ops = new ArrayList<>();
@@ -117,7 +121,9 @@ public class ExpressionParser {
         mainParser.getRecorder().recordSyntax("MulExp");
         while (mainParser.peek().getType() == TokenType.MULT ||
                 mainParser.peek().getType() == TokenType.DIV ||
-                mainParser.peek().getType() == TokenType.MOD) {
+                mainParser.peek().getType() == TokenType.MOD
+                /* [NEW] || mainParser.peek().getType() == TokenType.BITANDTK */
+                /* [NEW3] || mainParser.peek().getType() == TokenType.POWER */) {
             ops.add(mainParser.consume());
             exps.add(parseUnaryExp());
             mainParser.getRecorder().recordSyntax("MulExp");

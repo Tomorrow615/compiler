@@ -85,10 +85,6 @@ public class SemanticVisitor {
         currentScope.addBuiltInSymbol(putchFunc);
         
         FuncSymbol putstrFunc = new FuncSymbol("putstr", SymbolType.VoidFunc, 0);
-        // putstr 参数实际上是 char*，但在 SysY 中我们通常不检查参数，或者视作 void
-        // 这里为了兼容性，可以不加参数检查，或者添加一个 int 参数（如果是作为地址传入）
-        // 不过 putstr 通常接收字符串常量，我们在 Parser 层面处理可能不一样
-        // 但为了 SemanticVisitor 不报错，先加上。
         putstrFunc.addParameter(new ValueSymbol("str", SymbolType.ConstIntArray, 0, 1)); 
         currentScope.addBuiltInSymbol(putstrFunc);
 
@@ -130,28 +126,18 @@ public class SemanticVisitor {
         ValueSymbol symbol = new ValueSymbol(ident.getText(), type, ident.getLineNumber(), dimension);
 
         if (type == SymbolType.ConstInt) {
-            // (保持上一步的逻辑)
             try {
                 int value = exprVisitor.evalConstExp(node.getConstInitVal().getSingleInit());
                 symbol.setConstValue(value);
             } catch (Exception e) {
-                // ...
             }
         } else if (type == SymbolType.ConstIntArray) { //
-            // --- [ START 5.2-ArraySize: Store Array Size ] ---
             try {
-                // 1. 获取大小表达式 [cite: 1447-1451]
                 ConstExpNode sizeExp = node.getConstExps().get(0);
-                // 2. 调用 Pass 1 求值器
                 int size = exprVisitor.evalConstExp(sizeExp);
-                // 3. 存入新字段
                 symbol.setArraySize(size);
             } catch (Exception e) {
-                // ... (求值失败)
             }
-            // TODO: (Phase 5.C) 处理数组的常量初始化
-            // const int a[3] = {1, 2, 3};
-            // --- [ END 5.2-ArraySize: Store Array Size ] ---
         }
 
         boolean success = currentScope.addSymbol(symbol);
@@ -182,14 +168,10 @@ public class SemanticVisitor {
 
         if (type == SymbolType.IntArray || type == SymbolType.StaticIntArray) {
             try {
-                // 1. 获取大小表达式 [cite: 1447-1451]
                 ConstExpNode sizeExp = node.getConstExps().get(0);
-                // 2. 调用 Pass 1 求值器
                 int size = exprVisitor.evalConstExp(sizeExp);
-                // 3. 存入新字段
                 symbol.setArraySize(size);
             } catch (Exception e) {
-                // ... (求值失败)
             }
         }
 
@@ -216,7 +198,7 @@ public class SemanticVisitor {
                 funcSymbol = (FuncSymbol) existing;
             }
         }
-
+        // 设置当前函数
         setCurrentFunction(funcSymbol);
         enterScope(); // 进入函数的新作用域
         // 遍历形参
@@ -229,8 +211,7 @@ public class SemanticVisitor {
                     paramIdent.getLineNumber(), dimension);
 
             funcSymbol.addParameter(paramSymbol);
-
-            // 2. 添加到函数作用域中
+            // 添加到函数作用域中
             boolean paramSuccess = currentScope.addSymbol(paramSymbol);
             if (!paramSuccess) {
                 ErrorReporter.addError(paramIdent.getLineNumber(), 'b'); // 名字重定义 (形参)

@@ -19,8 +19,8 @@ public enum TokenType {
     RETURNTK,    // return
     VOIDTK,      // void
     STATICTK,    // static
-
-    // 界符 Delimiters
+    
+    // [NEW1] BITANDTK,    // bitand (按位与运算符)
     LPARENT,     // (
     RPARENT,     // )
     LBRACK,      // [
@@ -36,6 +36,7 @@ public enum TokenType {
     MULT,        // *
     DIV,         // /
     MOD,         // %
+    // [NEW3] POWER,       // ** (幂运算，a**b = (a+b)^b)
     LSS,         // <
     LEQ,         // <=
     GRE,         // >
@@ -46,6 +47,7 @@ public enum TokenType {
     AND,         // &&
     OR,          // ||
     NOT,         // !
+    // [NEW2] INCR,        // ++ (前缀自增，仅取值+1，不修改变量)
 
     // 文件结束符 End Of File
     EOF

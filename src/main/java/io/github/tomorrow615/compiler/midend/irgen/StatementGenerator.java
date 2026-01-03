@@ -107,6 +107,20 @@ public class StatementGenerator {
         BasicBlock elseBB = (node.getElseStmt() != null) ?
                 new BasicBlock(context.getNextLabel("if.else"), currentFunc) : null;
 
+        /* [原生支持方案] 处理 if (int a = 1) 语法
+           如果 IfStmtNode 有 initDecl 字段，需要：
+           1. 先进入作用域（变量 a 只在 if 内有效）
+           2. 生成变量声明的 IR
+           3. 再生成条件判断
+           4. 最后退出作用域
+        
+        boolean hasInitDecl = (node.getInitDecl() != null);
+        if (hasInitDecl) {
+            context.enterScope(); // 开启 if-level 作用域
+            mainGen.visitVarDecl(node.getInitDecl()); // 生成 alloca + store
+        }
+        */
+
         exprGen.buildConditionBranch(node.getCond(), thenBB, elseBB != null ? elseBB : mergeBB);
 
         builder.setInsertPoint(thenBB);
@@ -119,9 +133,24 @@ public class StatementGenerator {
             if (!builder.getCurrentBlock().hasTerminator()) builder.createBr(mergeBB);
         }
         builder.setInsertPoint(mergeBB);
+
+        /* [原生支持方案] 退出作用域
+        if (hasInitDecl) {
+            context.exitScope();
+        }
+        */
     }
 
+    // [NEW4] ForStmt → BType Ident '=' InitVal (for循环内声明变量)
     public void visitForStmt(ForStmtNode node) {
+        /* [NEW4] 处理 for(int i = 1;;) 语法
+        boolean hasInitDecl = (node.getInitDecl() != null);
+        if (hasInitDecl) {
+            context.enterScope(); // 开启 for-level 作用域
+            mainGen.visitVarDecl(node.getInitDecl()); // 生成 alloca + store
+        }
+        */
+        
         Function currentFunc = context.getCurrentFunction();
         BasicBlock condBB = new BasicBlock(context.getNextLabel("for.cond"), currentFunc);
         BasicBlock bodyBB = new BasicBlock(context.getNextLabel("for.body"), currentFunc);
@@ -164,6 +193,12 @@ public class StatementGenerator {
 
         builder.setInsertPoint(mergeBB);
         context.popLoop();
+        
+        /* [NEW4] 退出作用域
+        if (hasInitDecl) {
+            context.exitScope();
+        }
+        */
     }
 
     public void visitBreakStmt(BreakStmtNode node) {

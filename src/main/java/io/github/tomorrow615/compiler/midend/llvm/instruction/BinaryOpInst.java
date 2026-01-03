@@ -6,16 +6,17 @@ import io.github.tomorrow615.compiler.util.*;
 
 public class BinaryOpInst extends Instruction {
     public enum OpCode {
-        ADD, // +
-        SUB, // -
-        MUL, // *
-        SDIV, // / (有符号除法)
-        SREM, // % (有符号取余)
-        AND,
-        OR,
-        SHL,  // << (左移)
-        ASHR,  // >> (算术右移，保留符号位)
-
+        ADD,    // +
+        SUB,    // -
+        MUL,    // *
+        SDIV,   // / (有符号除法)
+        SREM,   // % (有符号取余)
+        AND,    // & (按位与)
+        OR,     // | (按位或)
+        XOR,    // ^ (按位异或)
+        SHL,    // << (左移)
+        LSHR,   // >>> (逻辑右移，补0)
+        ASHR,   // >> (算术右移，保留符号位)
     }
 
     private final OpCode op;
@@ -49,7 +50,9 @@ public class BinaryOpInst extends Instruction {
             case SREM -> "srem";
             case AND -> "and";
             case OR -> "or";
+            case XOR -> "xor";
             case SHL -> "shl";
+            case LSHR -> "lshr";
             case ASHR -> "ashr";
         };
         return tracker.getName(this) + " = " + opStr + " " + this.getType().toString()

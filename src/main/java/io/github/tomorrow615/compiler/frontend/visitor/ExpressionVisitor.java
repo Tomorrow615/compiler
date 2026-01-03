@@ -256,10 +256,22 @@ public class ExpressionVisitor {
             if (op.getType() == TokenType.MULT) {
                 lhsVal = lhsVal * rhsVal;
             } else if (op.getType() == TokenType.DIV) {
-                lhsVal = lhsVal / rhsVal; // 假设 SysY 行为同 Java int 除法
+                lhsVal = lhsVal / rhsVal; 
             } else if (op.getType() == TokenType.MOD) {
                 lhsVal = lhsVal % rhsVal;
+            } /*else if (op.getType() == TokenType.BITAND) {
+                lhsVal = lhsVal & rhsVal;
+            } */
+            /* [NEW3] ** 运算符常量求值: a**b = (a+b)^b
+            else if (op.getType() == TokenType.POWER) {
+                int base = lhsVal + rhsVal;
+                int result = 1;
+                for (int j = 0; j < rhsVal; j++) {
+                    result *= base;
+                }
+                lhsVal = result;
             }
+            */
         }
         return lhsVal;
     }
@@ -272,12 +284,18 @@ public class ExpressionVisitor {
                 int val = evalUnaryExp(node.getUnaryExp());
                 if (node.getUnaryOp().getOp().getType() == TokenType.MINU) {
                     return -val;
-                } else {
+                }
+                /* [NEW2] 常量计算支持 ++ 运算符
+                else if (node.getUnaryOp().getOp().getType() == TokenType.INCR) {
+                    return val + 1; // ++3 = 4
+                }
+                */
+                else {
                     return val; // '+' or '!' (在 ConstExp 中 ! 是非法的)
                 }
             case FUNC_CALL:
             default:
-                // SysY 规定 ConstExp 不能包含函数调用 [cite: 1495-1497]
+                // SysY 规定 ConstExp 不能包含函数调用
                 // SemanticVisitor 应该已报错，但我们这里返回 0 以防万一
                 return 0;
         }

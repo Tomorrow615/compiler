@@ -1,10 +1,8 @@
 package io.github.tomorrow615.compiler.frontend.parser;
 
 import io.github.tomorrow615.compiler.frontend.ast.BlockItemNode;
-import io.github.tomorrow615.compiler.frontend.ast.decl.DeclNode;
-import io.github.tomorrow615.compiler.frontend.ast.expr.CondNode;
-import io.github.tomorrow615.compiler.frontend.ast.expr.ExpNode;
-import io.github.tomorrow615.compiler.frontend.ast.expr.LValNode;
+import io.github.tomorrow615.compiler.frontend.ast.decl.*;
+import io.github.tomorrow615.compiler.frontend.ast.expr.*;
 import io.github.tomorrow615.compiler.frontend.ast.stmt.*;
 import io.github.tomorrow615.compiler.frontend.lexer.Token;
 import io.github.tomorrow615.compiler.frontend.lexer.TokenType;
@@ -80,9 +78,81 @@ public class StatementParser {
     }
 
     // | 'if' '(' Cond ')' Stmt [ 'else' Stmt ] // j
+    // | 'if' '(' 'int' Ident '=' InitVal ')' Stmt [ 'else' Stmt ]
     private StmtNode parseIfStmt() {
         Token ifToken = mainParser.consume();
         mainParser.consume();
+
+        /* [NEW] Support for: if (int a = 1) ...
+           Desc: Transforms 'if (int a = 1) stmt' into '{ int a = 1; if (a) stmt }'
+        if (mainParser.peek().getType() == TokenType.INTTK) {
+            Token intToken = mainParser.consume(); // int
+            BTypeNode bType = new BTypeNode(intToken);
+            Token ident = mainParser.consume(); // Ident
+            mainParser.consume(); // =
+            ExpNode initExp = expressionParser.parseExp(); // InitVal (simplified to Exp)
+            InitValNode initVal = new InitValNode(initExp);
+
+            mainParser.matchAndConsume(TokenType.RPARENT, 'j'); // )
+
+            // 1. Synthesize VarDecl: int a = 1;
+            List<ConstExpNode> emptyConstExps = new ArrayList<>();
+            VarDefNode varDef = new VarDefNode(ident, emptyConstExps, initVal);
+            List<VarDefNode> varDefs = new ArrayList<>();
+            varDefs.add(varDef);
+            VarDeclNode varDecl = new VarDeclNode(false, bType, varDefs, intToken.getLineNumber());
+
+            // 2. Synthesize Condition: if (a)
+            // LVal -> PrimaryExp -> UnaryExp -> MulExp -> AddExp -> RelExp -> EqExp -> LAndExp -> LOrExp -> Cond
+            LValNode lVal = new LValNode(ident);
+
+            PrimaryExpNode primaryExp = new PrimaryExpNode(lVal);
+
+            UnaryExpNode unaryExp = new UnaryExpNode(primaryExp);
+
+            List<UnaryExpNode> unaryExps = new ArrayList<>(); unaryExps.add(unaryExp);
+            MulExpNode mulExp = new MulExpNode(unaryExps, new ArrayList<>());
+
+            List<MulExpNode> mulExps = new ArrayList<>(); mulExps.add(mulExp);
+            AddExpNode addExp = new AddExpNode(mulExps, new ArrayList<>());
+
+            List<AddExpNode> addExps = new ArrayList<>(); addExps.add(addExp);
+            RelExpNode relExp = new RelExpNode(addExps, new ArrayList<>());
+
+            List<RelExpNode> relExps = new ArrayList<>(); relExps.add(relExp);
+            EqExpNode eqExp = new EqExpNode(relExps, new ArrayList<>());
+
+            List<EqExpNode> eqExps = new ArrayList<>(); eqExps.add(eqExp);
+            LAndExpNode lAndExp = new LAndExpNode(eqExps, new ArrayList<>());
+
+            List<LAndExpNode> lAndExps = new ArrayList<>(); lAndExps.add(lAndExp);
+            LOrExpNode lOrExp = new LOrExpNode(lAndExps, new ArrayList<>());
+            
+            CondNode cond = new CondNode(lOrExp);
+
+            StmtNode thenStmt = this.parseStmt();
+            StmtNode elseStmt = null;
+            if (mainParser.peek().getType() == TokenType.ELSETK) {
+                mainParser.consume();
+                elseStmt = this.parseStmt();
+            }
+
+            // 3. Create IfStmt
+            IfStmtNode ifStmt;
+            if (elseStmt != null) {
+                ifStmt = new IfStmtNode(cond, thenStmt, elseStmt, intToken.getLineNumber());
+            } else {
+                ifStmt = new IfStmtNode(cond, thenStmt, intToken.getLineNumber());
+            }
+
+            // 4. Wrap directly in Block: { int a=1; if(a)... }
+            List<BlockItemNode> blockItems = new ArrayList<>();
+            blockItems.add(varDecl);
+            blockItems.add(ifStmt);
+            return new BlockNode(blockItems, ifToken.getLineNumber(), (elseStmt!=null ? elseStmt : thenStmt).getLineNumber()); // End line approximate
+        }
+        */
+
         CondNode cond = expressionParser.parseCond();
         mainParser.matchAndConsume(TokenType.RPARENT, 'j');
         StmtNode thenStmt = this.parseStmt();
@@ -97,11 +167,24 @@ public class StatementParser {
     }
 
     // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt
+    // [NEW4] ForStmt -> BType Ident '=' InitVal (for循环内声明变量)
     private StmtNode parseForStmt() {
         Token forToken = mainParser.consume();
         mainParser.consume();
 
         ForSubStmtNode initStmt = null;
+        /* [NEW4] 检测 for(int i = 1;;) 形式的变量声明
+        VarDeclNode initDecl = null;
+        if (mainParser.peek().getType() == TokenType.INTTK) {
+            // 解析 int i = InitVal
+            mainParser.consume(); // int
+            Token ident = mainParser.matchAndConsume(TokenType.IDENFR, 'i');
+            mainParser.matchAndConsume(TokenType.ASSIGN, 'k');
+            InitValNode initVal = mainParser.parseInitVal();
+            
+            VarDefNode varDef = new VarDefNode(ident, new ArrayList<>(), initVal, false, ident.getLineNumber());
+            initDecl = new VarDeclNode(new ArrayList<>(){{ add(varDef); }}, false, ident.getLineNumber());
+        } else */
         if (mainParser.peek().getType() != TokenType.SEMICN) {
             initStmt = this.parseForSubStmt();
         }
@@ -123,6 +206,7 @@ public class StatementParser {
         mainParser.consume();
         StmtNode bodyStmt = this.parseStmt();
 
+        // [NEW4] return new ForStmtNode(initStmt, initDecl, cond, updateStmt, bodyStmt, forToken.getLineNumber());
         return new ForStmtNode(initStmt, cond, updateStmt, bodyStmt, forToken.getLineNumber());
     }
 

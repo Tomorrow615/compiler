@@ -137,7 +137,9 @@ public class ConstantFolding implements Pass {
             }
             case AND -> v1 & v2;
             case OR -> v1 | v2;
+            case XOR -> v1 ^ v2;
             case SHL -> v1 << v2;
+            case LSHR -> v1 >>> v2;
             case ASHR -> v1 >> v2;
         };
         

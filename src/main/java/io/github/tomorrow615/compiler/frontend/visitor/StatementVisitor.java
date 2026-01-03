@@ -100,7 +100,15 @@ public class StatementVisitor {
 
     // | 'for' '(' [ForStmt] ';' [Cond] ';' [ForStmt] ')' Stmt // h
     // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp } // h
+    // [NEW4] ForStmt → BType Ident '=' InitVal (for循环内声明变量)
     public void visitForStmt(ForStmtNode node) {
+        /* [NEW4] 处理 for(int i = 1;;) 语法
+        boolean hasInitDecl = (node.getInitDecl() != null);
+        if (hasInitDecl) {
+            hub.enterScope(); // 开启 for-level 作用域
+            hub.visitVarDecl(node.getInitDecl()); // 注册变量到符号表
+        }
+        */
         if (node.getInitStmt() != null) {
             visitForSubStmt(node.getInitStmt());
         }
@@ -114,6 +122,12 @@ public class StatementVisitor {
         hub.incrementLoopDepth();
         visitStmt(node.getBodyStmt());
         hub.decrementLoopDepth();
+        
+        /* [NEW4] 退出作用域
+        if (hasInitDecl) {
+            hub.exitScope();
+        }
+        */
     }
 
     // 语句 ForStmt → LVal '=' Exp { ',' LVal '=' Exp } // h

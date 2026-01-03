@@ -184,7 +184,7 @@ public class InstTranslator {
             currentMipsBlock.addInstruction(new MipsBinary("div", lhs, rhs));
             currentMipsBlock.addInstruction(new MipsBinary("mfhi", dest));
         } else if (inst.getOp() == BinaryOpInst.OpCode.SHL) {
-            // [Shift Optimization] 如果移位量是常数 (0-31)，直接生成 sll 立即数指令
+            // 左移：如果移位量是常数 (0-31)，直接生成 sll 立即数指令
             if (inst.getRhs() instanceof ConstantInt shiftAmt && isShiftImm5(shiftAmt.getValue())) {
                 Operand lhsOp = getOperand(inst.getLhs());
                 currentMipsBlock.addInstruction(new MipsBinary("sll", dest, lhsOp, shiftAmt.getValue()));
@@ -192,12 +192,20 @@ public class InstTranslator {
                 currentMipsBlock.addInstruction(new MipsBinary("sllv", dest, lhs, rhs));
             }
         } else if (inst.getOp() == BinaryOpInst.OpCode.ASHR) {
-            // [Shift Optimization] 如果移位量是常数 (0-31)，直接生成 sra 立即数指令
+            // 算术右移：如果移位量是常数 (0-31)，直接生成 sra 立即数指令
             if (inst.getRhs() instanceof ConstantInt shiftAmt && isShiftImm5(shiftAmt.getValue())) {
                 Operand lhsOp = getOperand(inst.getLhs());
                 currentMipsBlock.addInstruction(new MipsBinary("sra", dest, lhsOp, shiftAmt.getValue()));
             } else {
                 currentMipsBlock.addInstruction(new MipsBinary("srav", dest, lhs, rhs));
+            }
+        } else if (inst.getOp() == BinaryOpInst.OpCode.LSHR) {
+            // 逻辑右移：如果移位量是常数 (0-31)，直接生成 srl 立即数指令
+            if (inst.getRhs() instanceof ConstantInt shiftAmt && isShiftImm5(shiftAmt.getValue())) {
+                Operand lhsOp = getOperand(inst.getLhs());
+                currentMipsBlock.addInstruction(new MipsBinary("srl", dest, lhsOp, shiftAmt.getValue()));
+            } else {
+                currentMipsBlock.addInstruction(new MipsBinary("srlv", dest, lhs, rhs));
             }
         } else {
             String op = switch (inst.getOp()) {
@@ -206,6 +214,7 @@ public class InstTranslator {
                 case MUL -> "mul";
                 case AND -> "and";
                 case OR -> "or";
+                case XOR -> "xor";
                 default -> "addu";
             };
             currentMipsBlock.addInstruction(new MipsBinary(op, dest, lhs, rhs));
@@ -264,6 +273,14 @@ public class InstTranslator {
                 if (isUnsignedImm16(immVal)) {
                     Operand lhs = getOperand(lhsVal);
                     currentMipsBlock.addInstruction(new MipsBinary("ori", dest, lhs, immVal));
+                    return true;
+                }
+            }
+            case XOR -> {
+                // xori: 16位无符号立即数 [0, 65535]
+                if (isUnsignedImm16(immVal)) {
+                    Operand lhs = getOperand(lhsVal);
+                    currentMipsBlock.addInstruction(new MipsBinary("xori", dest, lhs, immVal));
                     return true;
                 }
             }

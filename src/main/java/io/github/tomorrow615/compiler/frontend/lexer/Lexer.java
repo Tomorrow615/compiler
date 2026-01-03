@@ -32,6 +32,7 @@ public class Lexer {
         keywords.put("return", TokenType.RETURNTK);
         keywords.put("void", TokenType.VOIDTK);
         keywords.put("static", TokenType.STATICTK);
+        // [NEW1] keywords.put("bitand", TokenType.BITANDTK);
     }
 
     public Lexer(String sourceCode, LexerRecorder recorder) {
@@ -174,9 +175,25 @@ public class Lexer {
         tokenText.append((char) c);
 
         switch (c) {
-            case '+': return new Token(TokenType.PLUS, "+", null, currentLine);
+            case '+':
+                /* [NEW2] 识别 ++ 运算符
+                if (peekChar() == '+') {
+                    readChar(); // 消耗第二个 '+'
+                    tokenText.append('+');
+                    return new Token(TokenType.INCR, "++", null, currentLine);
+                }
+                */
+                return new Token(TokenType.PLUS, "+", null, currentLine);
             case '-': return new Token(TokenType.MINU, "-", null, currentLine);
-            case '*': return new Token(TokenType.MULT, "*", null, currentLine);
+            case '*':
+                /* [NEW3] 识别 ** 运算符
+                if (peekChar() == '*') {
+                    readChar(); // 消耗第二个 '*'
+                    tokenText.append('*');
+                    return new Token(TokenType.POWER, "**", null, currentLine);
+                }
+                */
+                return new Token(TokenType.MULT, "*", null, currentLine);
             case '%': return new Token(TokenType.MOD, "%", null, currentLine);
             case '(': return new Token(TokenType.LPARENT, "(", null, currentLine);
             case ')': return new Token(TokenType.RPARENT, ")", null, currentLine);

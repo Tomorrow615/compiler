@@ -29,10 +29,9 @@ public class IRGenerator {
         this.stmtGen = new StatementGenerator(context, exprGen, this);
     }
 
+    // 编译单元 CompUnit → {Decl} {FuncDef} MainFuncDef 
     public Module generate() {
-        // [Fix] 初始化内置函数的 LLVM 定义 (declare)
         initializeBuiltinFunctions();
-
         for (DeclNode decl : astRoot.getDecls()) {
             visitDecl(decl);
         }
@@ -51,7 +50,7 @@ public class IRGenerator {
         registerLibFunc(globalScope, "putint", VoidType.get(), IntegerType.i32);
         registerLibFunc(globalScope, "putch", VoidType.get(), IntegerType.i32);
         registerLibFunc(globalScope, "putstr", VoidType.get(), new PointerType(IntegerType.i8));
-        registerLibFunc(globalScope, "printf", VoidType.get()); // printf 通常是变参，这里简化处理，反正只用于 declare
+        registerLibFunc(globalScope, "printf", VoidType.get());
     }
 
     private void registerLibFunc(SymbolTable scope, String name, Type retType, Type... paramTypes) {
@@ -294,7 +293,6 @@ public class IRGenerator {
             }
             initializer = new ConstantArray(type, initValues);
             if (isConst) symbol.setConstArrayValues(intValues);
-
         }
         else {
             type = IntegerType.i32;

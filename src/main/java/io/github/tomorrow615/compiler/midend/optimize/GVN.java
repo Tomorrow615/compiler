@@ -212,8 +212,13 @@ public class GVN implements Pass {
                 if (lhs == rhs) yield lhs;  // x | x = x
                 yield null;
             }
-            case SHL, ASHR -> {
+            case SHL, LSHR, ASHR -> {
                 if (rhsIsZero) yield lhs;  // x << 0 = x, x >> 0 = x
+                yield null;
+            }
+            case XOR -> {
+                if (rhsIsZero) yield lhs;  // x ^ 0 = x
+                if (lhs == rhs) yield new ConstantInt(0);  // x ^ x = 0
                 yield null;
             }
         };

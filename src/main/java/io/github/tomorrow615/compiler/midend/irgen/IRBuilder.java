@@ -4,6 +4,7 @@ import io.github.tomorrow615.compiler.midend.llvm.Module;
 import io.github.tomorrow615.compiler.midend.llvm.instruction.*;
 import io.github.tomorrow615.compiler.midend.llvm.type.Type;
 import io.github.tomorrow615.compiler.midend.llvm.value.BasicBlock;
+import io.github.tomorrow615.compiler.midend.llvm.value.ConstantInt;
 import io.github.tomorrow615.compiler.midend.llvm.value.Function;
 import io.github.tomorrow615.compiler.midend.llvm.value.Value;
 
@@ -77,6 +78,56 @@ public class IRBuilder {
 
     public Value createSrem(Value lhs, Value rhs, String name) {
         return new BinaryOpInst(BinaryOpInst.OpCode.SREM, lhs, rhs, name, this.currentBlock);
+    }
+
+    // ==================== 位运算指令 ====================
+
+    public Value createAnd(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.AND, lhs, rhs, name, this.currentBlock);
+    }
+
+    public Value createOr(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.OR, lhs, rhs, name, this.currentBlock);
+    }
+
+    public Value createXor(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.XOR, lhs, rhs, name, this.currentBlock);
+    }
+
+    public Value createShl(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.SHL, lhs, rhs, name, this.currentBlock);
+    }
+
+    public Value createLshr(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.LSHR, lhs, rhs, name, this.currentBlock);
+    }
+
+    public Value createAshr(Value lhs, Value rhs, String name) {
+        return new BinaryOpInst(BinaryOpInst.OpCode.ASHR, lhs, rhs, name, this.currentBlock);
+    }
+
+    // ==================== 一元运算便捷方法 ====================
+
+    /**
+     * 取负: -val 等价于 0 - val
+     */
+    public Value createNeg(Value val, String name) {
+        return createSub(new ConstantInt(0), val, name);
+    }
+
+    /**
+     * 按位取反: ~val 等价于 val XOR -1 (即 val XOR 0xFFFFFFFF)
+     */
+    public Value createNot(Value val, String name) {
+        return createXor(val, new ConstantInt(-1), name);
+    }
+
+    /**
+     * 逻辑非: !val 等价于 (val == 0) ? 1 : 0
+     * 返回 i1 类型，如果需要 i32 请调用者自行 zext
+     */
+    public Value createLogicalNot(Value val, String name) {
+        return new IcmpInst(IcmpInst.CmpType.EQ, val, new ConstantInt(0), name, this.currentBlock);
     }
 
     public Value createIcmp(IcmpInst.CmpType type, Value lhs, Value rhs, String name) {

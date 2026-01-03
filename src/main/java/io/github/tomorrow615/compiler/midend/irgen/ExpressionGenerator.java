@@ -81,13 +81,24 @@ public class ExpressionGenerator {
                 Value val = visitUnaryExp(node.getUnaryExp());
                 Token op = node.getUnaryOp().getOp();
                 if (op.getType() == TokenType.MINU) {
+                    // 取负: -val
                     return builder.createSub(new ConstantInt(0), val, "negtmp");
                 } else if (op.getType() == TokenType.PLUS) {
+                    // 取正: +val
                     return val;
                 } else if (op.getType() == TokenType.NOT) {
-                    Value i1Val = builder.createIcmp(IcmpInst.CmpType.EQ, val, new ConstantInt(0), "nottmp");
+                    // 逻辑非: !val -> (val == 0) 扩展为 i32
+                    Value i1Val = builder.createLogicalNot(val, "nottmp");
                     return builder.createZext(i1Val, IntegerType.i32, "zexttmp");
-                }
+                } 
+                /*else if (op.getType() == TokenType.BITNOT) {
+                    // 按位取反: ~val -> val XOR -1
+                    return builder.createNot(val, "bitnottmp");
+                }*/
+                /*else if (op.getType() == TokenType.INCR) {
+                    // 前缀自增: ++val -> val + 1 (不修改原变量)
+                    return builder.createAdd(val, new ConstantInt(1), "incrtmp");
+                }*/
                 break;
             case FUNC_CALL:
                 return handleFuncCall(node);
@@ -151,6 +162,21 @@ public class ExpressionGenerator {
                 case MULT -> lhs = builder.createMul(lhs, rhs, "multmp");
                 case DIV -> lhs = builder.createSdiv(lhs, rhs, "divtmp");
                 case MOD -> lhs = builder.createSrem(lhs, rhs, "modtmp");
+                // [NEW] case BITANDTK -> lhs = builder.createAnd(lhs, rhs, "bitandtmp");
+                /* [NEW3] case POWER -> {
+                    // a ** b = (a + b) ^ b，其中 b 保证是常量
+                    // 1. 计算 base = a + b
+                    Value base = builder.createAdd(lhs, rhs, "powbase");
+                    // 2. 获取常量 b 的值 (题目保证 b 是常量)
+                    int exp = ((ConstantInt) rhs).getValue();
+                    // 3. 用展开循环计算 base^exp
+                    Value result = new ConstantInt(1);
+                    for (int j = 0; j < exp; j++) {
+                        result = builder.createMul(result, base, "powtmp");
+                    }
+                    lhs = result;
+                }
+                */
             }
         }
         return lhs;
