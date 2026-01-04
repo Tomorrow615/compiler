@@ -20,8 +20,9 @@ public class Config {
     public static boolean OPT_MEM2REG = true;               // SSA转换
     public static boolean OPT_SIMPLIFY_CFG = true;          // CFG简化
     public static boolean OPT_DCE = true;                   // 死代码消除
-        public static boolean OPT_MEM_FORWARD = true;           // 内存转发优化 (store→load消除)
     public static boolean OPT_GLOBAL_DCE = true;            // 全局死函数消除
+
+    public static boolean OPT_MEM_FORWARD = false;           // 内存转发优化 (store→load消除)
 
     // --- Phase 2: 核心迭代优化 ---
     public static boolean OPT_INLINING = true;              // 函数内联
@@ -54,6 +55,9 @@ public class Config {
     // --- 数组优化 ---
     public static int MAX_ARRAY_SIZE = 1024;                // SROA/Global2Local 数组大小限制
 
+    // --- 窥孔迭代 ---
+    public static int MAX_PEEPHOLE_ITERATIONS = 3;         // 最大窥孔优化迭代次数
+
     // ==================== 后端优化开关 ====================
     
     // --- 立即数优化 ---
@@ -68,8 +72,8 @@ public class Config {
     // 激进窥孔优化开关
     // 包含：跨指令转发、分支跳转增强、栈指针合并、Move链消除等高级优化
     // 风险较高，但能显著降低 FinalCycle
-    public static boolean ENABLE_AGGRESSIVE_PEEPHOLE = true;
+    public static boolean ENABLE_AGGRESSIVE_PEEPHOLE = false;
     
     // [Extreme] 极端激进优化 (Assumption-based Aliasing, etc.)
-    public static boolean ENABLE_EXTREME_PEEPHOLE = true;
+    public static boolean ENABLE_EXTREME_PEEPHOLE = false;
 }

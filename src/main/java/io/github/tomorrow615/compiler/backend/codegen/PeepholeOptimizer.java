@@ -39,7 +39,8 @@ public class PeepholeOptimizer {
     /**
      * 最大迭代次数，防止死循环
      */
-    private static final int MAX_ITERATIONS = 15;
+    // private static final int MAX_ITERATIONS = 15; // Moved to Config
+
 
     public PeepholeOptimizer(MipsModule module) {
         this.module = module;
@@ -68,7 +69,7 @@ public class PeepholeOptimizer {
             totalRemoved += removedCount;
             changed = (removedCount > 0);
             iteration++;
-        } while (changed && iteration < MAX_ITERATIONS);
+        } while (changed && iteration < Config.MAX_PEEPHOLE_ITERATIONS);
 
         return totalRemoved;
     }
