@@ -17,6 +17,7 @@ public class Optimizer {
         if (Config.OPT_PROMOTE_STATIC_LOCAL) runPass(module, new PromoteStaticLocal());
         if (Config.OPT_SIMPLIFY_CFG) runPass(module, new SimplifyCFG());
         if (Config.OPT_MEM2REG) runPass(module, new Mem2Reg());
+        if (Config.OPT_MEM_FORWARD) runPass(module, new MemForward());
         if (Config.OPT_DCE) runPass(module, new DeadCodeElimination());
 
         // === Phase 2: 核心迭代 ===
@@ -48,6 +49,7 @@ public class Optimizer {
                 // B. 内存提升（为 LICM 铺路）
                 if (Config.OPT_SROA) runPass(module, new SROA_Simple());
                 if (Config.OPT_MEM2REG) runPass(module, new Mem2Reg());
+                if (Config.OPT_MEM_FORWARD) runPass(module, new MemForward());
 
                 // C. 循环变换
                 if (Config.OPT_STRENGTH_REDUCE) runPass(module, new StrengthReduction());
@@ -86,6 +88,7 @@ public class Optimizer {
             // 内存提升：让循环优化在寄存器形式下工作
             if (Config.OPT_SROA) runPass(module, new SROA_Simple());
             if (Config.OPT_MEM2REG) runPass(module, new Mem2Reg());
+            if (Config.OPT_MEM_FORWARD) runPass(module, new MemForward());
             if (Config.OPT_LICM) runPass(module, new LICM());
             if (Config.OPT_STRENGTH_REDUCE) runPass(module, new StrengthReduction());
             if (Config.OPT_GVN) runPass(module, new GVN());

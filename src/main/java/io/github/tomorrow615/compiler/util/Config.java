@@ -20,6 +20,7 @@ public class Config {
     public static boolean OPT_MEM2REG = true;               // SSA转换
     public static boolean OPT_SIMPLIFY_CFG = true;          // CFG简化
     public static boolean OPT_DCE = true;                   // 死代码消除
+        public static boolean OPT_MEM_FORWARD = true;           // 内存转发优化 (store→load消除)
     public static boolean OPT_GLOBAL_DCE = true;            // 全局死函数消除
 
     // --- Phase 2: 核心迭代优化 ---
