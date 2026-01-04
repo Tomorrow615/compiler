@@ -39,7 +39,7 @@ public class Config {
     // --- 迭代控制 ---
     public static int MAX_INLINE_ITERATIONS = 10;           // 最大内联迭代次数
     public static int MAX_INNER_ITERATIONS = 3;             // 内部清理循环次数
-    public static int MAX_INSTRUCTION_THRESHOLD = 2500;     // 代码膨胀熔断阈值(容易tle）
+    public static int MAX_INSTRUCTION_THRESHOLD = 2000;     // 代码膨胀熔断阈值(容易tle）
 
     // --- 函数内联 ---
     public static int MAX_INLINES_PER_ROUND = 50;           // 单轮内联最大数量
@@ -63,4 +63,12 @@ public class Config {
 
     // --- 基本块布局优化 ---
     public static boolean ENABLE_BLOCK_LAYOUT = true;
+    
+    // 激进窥孔优化开关
+    // 包含：跨指令转发、分支跳转增强、栈指针合并、Move链消除等高级优化
+    // 风险较高，但能显著降低 FinalCycle
+    public static boolean ENABLE_AGGRESSIVE_PEEPHOLE = true;
+    
+    // [Extreme] 极端激进优化 (Assumption-based Aliasing, etc.)
+    public static boolean ENABLE_EXTREME_PEEPHOLE = true;
 }

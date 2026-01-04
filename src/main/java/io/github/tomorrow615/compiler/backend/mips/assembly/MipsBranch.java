@@ -57,6 +57,10 @@ public class MipsBranch extends MipsInstruction {
         return rs;
     }
 
+    public Operand getRt() {
+        return rt;
+    }
+
     @Override
     public String toString() {
         if (label != null) {

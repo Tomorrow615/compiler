@@ -269,11 +269,12 @@ public class LoopUnrolling implements Pass {
                 } else {
                     Value latchVal = getPhiLatchValue(phi, loop);
                     if (latchVal != null) {
-                        if (lastIterMap.containsKey(latchVal)) {
-                            valueMap.put(phi, lastIterMap.get(latchVal));
-                        } else {
-                            valueMap.put(phi, latchVal);
-                        }
+                        // 从lastIterMap获取latchVal的实际值
+                        Value actualVal = lastIterMap.getOrDefault(latchVal, latchVal);
+                        valueMap.put(phi, actualVal);
+                    } else {
+                        // 无法获取latch值时，使用上一次迭代的phi值
+                        valueMap.put(phi, lastIterMap.getOrDefault(phi, entry.getValue()));
                     }
                 }
             }
@@ -288,9 +289,34 @@ public class LoopUnrolling implements Pass {
                 }
             }
             
+            // 【关键修复3.0】在迭代结束后，更新每个Phi的"结束值"
+            // 注意：必须使用两阶段更新，因为Phi之间可能存在依赖关系
+            // 例如 b_phi 的 latchVal 是 a_phi，如果在同一个循环中更新，
+            // b_phi 可能读取到 a_phi 的旧值（取决于HashMap遍历顺序）
+            
+            // 阶段1：计算所有Phi的结束值到临时map
+            Map<PhiInst, Value> phiEndValues = new HashMap<>();
+            for (Map.Entry<PhiInst, Value> entry : phiBaseMap.entrySet()) {
+                PhiInst phi = entry.getKey();
+                Value latchVal = getPhiLatchValue(phi, loop);
+                if (latchVal != null) {
+                    // 从当前valueMap获取latchVal的值
+                    // 如果latchVal是另一个Phi，此时获取的是该Phi在迭代开始时的值，这正是我们需要的！
+                    // 因为 b = a 的语义是 "b 取当前迭代开始时 a 的值"
+                    Value endValue = valueMap.getOrDefault(latchVal, latchVal);
+                    phiEndValues.put(phi, endValue);
+                }
+            }
+            
+            // 阶段2：一次性更新所有Phi的结束值到valueMap
+            for (Map.Entry<PhiInst, Value> entry : phiEndValues.entrySet()) {
+                valueMap.put(entry.getKey(), entry.getValue());
+            }
+            
             lastIterMap = valueMap;
             currentInductionVal += tripInfo.step;
         }
+
 
         // --- 4. 重构 CFG ---
         // 移除 PreHeader 旧跳转
@@ -383,16 +409,14 @@ public class LoopUnrolling implements Pass {
                 continue;
             }
             
-            Value latchVal = getPhiLatchValue(phi, loop);
-            if (latchVal != null) {
-                // 如果 latchVal 在 lastIterMap 中，说明它是循环内部计算的值（如 sum + a[i]）
-                // 此时用最后一次迭代的计算结果替换 phi 的所有引用
-                if (lastIterMap.containsKey(latchVal)) {
-                    safeReplaceAllUses(phi, lastIterMap.get(latchVal));
-                } else {
-                    // 如果 latchVal 不在 map 中（比如是常量或不变量），直接替换
-                    safeReplaceAllUses(phi, latchVal);
-                }
+            // 【关键修复 2.0】
+            // 由于我们在上面（Step 3）已经确保 lastIterMap 在迭代结束时更新为"结束值"，
+            // 这里的 phi 在循环外的引用（即循环结束后的值）直接取 lastIterMap.get(phi) 即可。
+            // 原来的 getPhiLatchValue 逻辑是多余且错误的（对于 b_phi，它的 latchVal 是 a_phi，
+            // 导致这里错误地取了 a 的值！）。
+            
+            if (lastIterMap.containsKey(phi)) {
+                safeReplaceAllUses(phi, lastIterMap.get(phi));
             }
         }
 
